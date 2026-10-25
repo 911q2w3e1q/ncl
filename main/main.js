@@ -18,7 +18,7 @@ const aiAnalyzer = require('./ai-analyzer');
 const aiFixer = require('./ai-fixer');
 
 const LAUNCHER_NAME = 'NCL';
-const LAUNCHER_VERSION = '1.4.0';
+const LAUNCHER_VERSION = '1.5.0';
 const MANIFEST_URL = 'https://piston-meta.mojang.com/mc/game/version_manifest_v2.json';
 const JAVA_MANIFEST_URL = 'https://launchermeta.mojang.com/v1/products/java-runtime/2ec0cc96c44e5a76b9c8b7c39df7210883d12871/all.json';
 const GITHUB_REPO = '911q2w3e1q/ncl';

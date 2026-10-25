@@ -1,6 +1,6 @@
-# NCL 开发交接文档（v1.4.0 已发布）
+# NCL 开发交接文档（v1.5.0 已发布）
 
-> 最后更新：2026-10-25 22:20（v1.4.0 Release 发布完成：AI 报错分析）
+> 最后更新：2026-10-26 07:40（v1.5.0 Release 发布完成：新增 .NET 版 Windows 专用启动器）
 > 用途：会话上下文若被清理，新会话凭本文档 + 任务清单无缝接手。
 
 ## 一、项目位置与运行方式
@@ -13,7 +13,8 @@
   - v1.1.0（三平台）：https://github.com/911q2w3e1q/ncl/releases/tag/v1.1.0
   - v1.2.0（三平台）：https://github.com/911q2w3e1q/ncl/releases/tag/v1.2.0
   - v1.3.0（四大加载器 + 主题）：https://github.com/911q2w3e1q/ncl/releases/tag/v1.3.0
-  - **v1.4.0（当前版）**：https://github.com/911q2w3e1q/ncl/releases/tag/v1.4.0
+  - v1.4.0（AI 报错分析）：https://github.com/911q2w3e1q/ncl/releases/tag/v1.4.0
+  - **v1.5.0（当前版，新增 .NET 版）**：https://github.com/911q2w3e1q/ncl/releases/tag/v1.5.0
 
 ## 二、v1.4.0 新增（TaskList #33–#37 全部完成）
 
@@ -239,3 +240,66 @@
 - pkill 会自杀自身 shell，用 `ps aux | grep` 复核
 - Node 测试 require main.js 前必须 `process.env.CUBE_TEST_MODE = '1'`，且需 `setGameRoot` + `setLauncherDir` 都调（paths() 用 GAME_ROOT）
 - Electron 截图需 `--disable-gpu`，dbus 报错无害
+
+## 九点六、v1.5.0 发布结果（2026-10-26 完成）
+
+### 主题
+
+新增 **只支持 Windows 的 .NET 版**启动器，与原 Windows（Electron）版**并存、互不覆盖**。
+
+- .NET 版：`.NET Framework 4.8` + WinForms，C# 7.3，全功能重写
+- 命名：`NCL-1.5.0-win64-dotnet.zip`（原版 `NCL-1.5.0-win64.zip` 保持不变）
+- 目标平台：Win7 SP1（Win7 支持的最高 .NET Framework 版本）
+
+### 源码结构（`dotnet/` 目录，此前仓库无此目录）
+
+| 路径 | 内容 |
+|---|---|
+| `dotnet/NCL.NET/NCL.NET.csproj` | net48 / WinExe / WinForms / LangVersion 7.3 + `Microsoft.NETFramework.ReferenceAssemblies` 1.0.3 + Newtonsoft.Json 13.0.3 |
+| `dotnet/NCL.NET/app.config` | `supportedRuntime sku=".NETFramework,Version=v4.8"` |
+| `dotnet/NCL.NET/Core/` | Paths / Net / Settings / Accounts / Rules / Java / Installer / Loaders / Launch / Ecdsa / Auth / AiAnalyzer / AiFixer / DownloadCenter / Wiki（15 个模块） |
+| `dotnet/NCL.NET/Forms/` | Theme / MainForm / GamePage / AccountDialog / VersionDialog / AiPanelForm / SettingsPage / DownloadPage / WikiPage / VersionSettingsDialog（11 个文件，纯代码构建 UI，无 .Designer.cs） |
+| `dotnet/NCL.NET/Program.cs` | `[STAThread] Main` → TLS 配置 → `Paths.Init()` → `Application.Run` |
+| `dotnet/NCL.Tests/` | 自研断言框架 + 24 组 / 140 项单测 |
+
+### 关键技术决策
+
+- **纯托管 ECDSA P-256（`Core/Ecdsa.cs`）**：Win7 的 CNG 对 ECC 支持不完整，`System.Security.Cryptography.ECDsa` 不可靠 → 自研 BigInteger 椭圆曲线点乘 + 扩展欧几里得求逆 + 低 S 归一化，输出 IEEE-P1363 64 字节签名
+- **`GlobalMemoryStatusEx` P/Invoke**（`Core/Launch.cs`）：取代 WMI 与 `Microsoft.VisualBasic.Devices.ComputerInfo`（mono 运行时缺该程序集）
+- **Win7 TLS 1.2**（`Core/Net.cs` `ConfigureTls`）：Win7 默认不启用，否则全部 HTTPS 失败
+- **C# 7.3 限制**：不支持 switch 表达式（递归模式）、`??=`、`TextBox.PlaceholderText`、`File.Move` 三参数、`File.CreateHardLink`/`CreateSymbolicLink`、`GC.GetGCMemoryInfo` → 逐一改写为 if/else、删除后 Move、`cmd mklink` 兜底等
+- **便携布局**：启动器旁 `.ncl`（启动器数据）+ `.minecraft`（游戏数据），与 Electron 版一致；`Paths.InitForTest()` 为测试钩子
+
+### 资产（构建脚本 `/tmp/build-150.sh` + 手工打包 .NET 版）
+
+| 资产 | 字节数 |
+|---|---|
+| NCL-1.5.0-win64.zip | 134,256,717 |
+| NCL-1.5.0-win64-dotnet.zip | 492,413 |
+| NCL-1.5.0-linux-x64.tar.gz | 114,481,396 |
+| NCL-1.5.0-macos-arm64.zip | 108,594,870 |
+| NCL-1.5.0-macos-x64.zip | 113,432,375 |
+
+.NET 版 zip 内容：`NCL.exe` + `NCL.exe.config` + `Newtonsoft.Json.dll` + `使用说明.txt`
+
+### 验证
+
+- `.NET` 版 140 项单测**全部通过**（mono 运行 `NCL.Tests.exe`）
+- `.NET` 版界面在 xvfb 下四页逐页截图验证（存档 `docs/NCL界面-.NET版-*.png`）
+- Electron 版 Linux 包 xvfb 实测启动无 `UnhandledPromiseRejection`
+- Electron 全部测试通过：core-test / ai-analyzer(32) / loaders-theme(11) / updater-wiki(26) / crossplatform(14)
+
+### v1.5.0 修复的 Bug
+
+| Bug | 位置 | 现象 | 修复 |
+|---|---|---|---|
+| Java 版本解析正则尾部多一个引号 | `dotnet/NCL.NET/Core/Java.cs` | `ParseJavaMajor("version \"1.8.0_391\"")` 返回 null → 3 项测试失败 | 正则改为 `@"version ""(\d+)(?:\.(\d+))?"` |
+| 顶栏导航按钮未设 Location | `dotnet/NCL.NET/Forms/MainForm.cs` | 四个按钮全叠在左上角，被品牌字遮住 | 补 `b.Location = new Point(x, 0)` |
+| 设置页用 TabControl 当左侧导航 | `dotnet/NCL.NET/Forms/SettingsPage.cs` | 深色主题下出现一大块空标签区 | 改为竖排 Button 侧栏 + `SetChildIndex` 修正顺序 |
+| .NET 版更新检查会误抓 Electron 资产 | `dotnet/NCL.NET/Core/Wiki.cs` | 正则 `-win64(-dotnet)?\.zip$` 会先匹配到 Electron 包 | 改为只认 `-win64-dotnet\.zip$` |
+
+### 已知限制
+
+- .NET 版**仅 Windows**（WinForms 界面层是 Windows 专属）
+- **Windows 真机未验证**：沙箱为 Linux，.NET 版通过 mono + xvfb 完成编译与界面回归
+- .NET 版无 Chromium 特效（毛玻璃 / 渐变导航栏）

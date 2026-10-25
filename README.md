@@ -1,6 +1,8 @@
 # NCL — Nexus Craft Launcher
 
-一个自玩的 Minecraft Java 版启动器（Electron，命名对标 PCL）。当前版本聚焦**「开始游戏」主链路**：账户 → 选版本 → 版本设置 → 一键启动，外加完整的**下载中心**（Modrinth / 镜像站双来源，六大内容分类）、PCL 式**启动器设置**、**Wiki 整合页**与 **AI 报错分析**（崩溃自动分析原因 + 一键修复）。
+一个自玩的 Minecraft Java 版启动器（命名对标 PCL）。当前版本聚焦**「开始游戏」主链路**：账户 → 选版本 → 版本设置 → 一键启动，外加完整的**下载中心**（Modrinth / 镜像站双来源，六大内容分类）、PCL 式**启动器设置**、**Wiki 整合页**与 **AI 报错分析**（崩溃自动分析原因 + 一键修复）。
+
+**v1.5.0 起提供两个实现**：默认的 Electron 版（三平台通用，界面特效完整），以及用 **C# / .NET Framework 4.8 完全重写**的 **.NET 版**（仅 Windows，包体 ~0.5 MB，空闲常驻内存约为 Electron 版的 1/5，支持 Win7 SP1）。两者功能一致、并存使用。
 
 ## 功能
 
@@ -62,20 +64,36 @@
   - **官方更新日志页内直读**：详细视图下方直接渲染 Mojang 官方更新日志全文（HTML 白名单净化，链接新窗口打开），不再跳网页；官方源未收录的版本保留「在 Minecraft Wiki 查看」外链兜底
   - 结构化数据完全来自版本清单 + 本机安装状态（可本地验证）
 
-## 下载（三平台兼容版 1.4.0）
+## 下载（v1.5.0）
 
 [GitHub Releases](https://github.com/911q2w3e1q/ncl/releases) 提供开箱即用的打包版本，无需 Node 环境：
 
 | 平台 | 包 | 用法 |
 | --- | --- | --- |
-| Windows 10/11 | `NCL-1.4.0-win64.zip` | 解压后双击 `NCL.exe`（与 `engine` 文件夹保持在一起） |
-| Linux x64 | `NCL-1.4.0-linux-x64.tar.gz` | 解压后执行 `./NCL.sh` |
-| macOS Apple Silicon | `NCL-1.4.0-macos-arm64.zip` | 解压后右键 → 打开 `NCL.app`（未签名，首次需右键绕过 Gatekeeper） |
-| macOS Intel | `NCL-1.4.0-macos-x64.zip` | 同上 |
+| Windows 10/11（Electron 版） | `NCL-1.5.0-win64.zip` | 解压后双击 `NCL.exe`（与 `engine` 文件夹保持在一起） |
+| **Windows 7 SP1 / 8 / 10 / 11（.NET 版）** | **`NCL-1.5.0-win64-dotnet.zip`** | **解压后双击 `NCL.exe`，仅 3 个文件，内存占用约为 Electron 版的 1/5** |
+| Linux x64 | `NCL-1.5.0-linux-x64.tar.gz` | 解压后执行 `./NCL.sh` |
+| macOS Apple Silicon | `NCL-1.5.0-macos-arm64.zip` | 解压后右键 → 打开 `NCL.app`（未签名，首次需右键绕过 Gatekeeper） |
+| macOS Intel | `NCL-1.5.0-macos-x64.zip` | 同上 |
 
-三平台共用同一套源码，游戏数据各存各的标准位置，互不干扰。1.0.0（仅 Windows）与 1.1.0 Release 仍保留，不影响老用户。
+两个 Windows 包功能一致（账户 / 版本 / 四大加载器 / 下载中心 / Wiki / AI 报错分析全都有），**并存使用、互不覆盖**：想要低内存与 Win7 兼容选 `.NET` 版，想要完整界面特效选 Electron 版。1.0.0 – 1.4.0 Release 仍保留，不影响老用户。
 
 **更新方式**：设置 → 启动器 → 检查更新 → 下载并安装，启动器会自动重启完成替换（也可直接下载新版包手动覆盖）。
+
+## .NET 版（Windows 专用）
+
+源码位于 `dotnet/` 目录：
+
+- `dotnet/NCL.NET/` —— C# / .NET Framework 4.8 + WinForms 主体（Core 后端 15 个模块 + Forms 界面 11 个文件）
+- `dotnet/NCL.Tests/` —— 自研断言测试框架，140 项单元测试
+
+```bash
+cd dotnet
+dotnet build NCL.Tests/NCL.Tests.csproj -c Release
+mono NCL.Tests/bin/Release/net48/NCL.Tests.exe   # 140 项全部通过
+```
+
+关键技术点：纯托管 ECDSA P-256（Win7 CNG 对 ECC 支持不完整，微软正版登录签名自研）、Win32 `GlobalMemoryStatusEx` 读物理内存、Win7 主动启用 TLS 1.2、自研 WinForms 深色主题与轻提示组件。
 
 ## 运行（源码方式）
 
