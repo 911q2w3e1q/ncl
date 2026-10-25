@@ -11,20 +11,29 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
-const { spawn, execFile } = require('child_process');
+const { spawn, execFile, fork } = require('child_process');
 const { Readable } = require('stream');
 const AdmZip = require('adm-zip');
 
 const LAUNCHER_NAME = 'NCL';
-const LAUNCHER_VERSION = '1.1.0';
+const LAUNCHER_VERSION = '1.2.0';
 const MANIFEST_URL = 'https://piston-meta.mojang.com/mc/game/version_manifest_v2.json';
 const JAVA_MANIFEST_URL = 'https://launchermeta.mojang.com/v1/products/java-runtime/2ec0cc96c44e5a76b9c8b7c39df7210883d12871/all.json';
+const GITHUB_REPO = '911q2w3e1q/ncl';
+const FABRIC_META = 'https://meta.fabricmc.net/v2';
+const FABRIC_META_MIRROR = 'https://bmclapi2.bangbang93.com/fabric-meta/v2';
+const PATCH_NOTES_URL = 'https://launchercontent.mojang.com/javaPatchNotes.json';
 
-/* ---------------- 路径 ---------------- */
+/* ---------------- 路径 ----------------
+ * GAME_ROOT：游戏数据（版本/库/资源/Java 运行时），默认放启动器旁边（便携，PCL 风格），可在设置更改
+ * LAUNCHER_DIR：启动器自身数据（设置/账户/皮肤/更新包），位置固定不随游戏目录切换
+ */
 let GAME_ROOT = null;
+let LAUNCHER_DIR = null;
 let win = null;
 
 function paths() {
+  const launcher = LAUNCHER_DIR || path.join(GAME_ROOT, 'launcher'); // 测试模式下回退旧行为
   return {
     root: GAME_ROOT,
     versions: path.join(GAME_ROOT, 'versions'),
@@ -33,9 +42,76 @@ function paths() {
     objects: path.join(GAME_ROOT, 'assets', 'objects'),
     indexes: path.join(GAME_ROOT, 'assets', 'indexes'),
     runtime: path.join(GAME_ROOT, 'runtime'),
-    launcher: path.join(GAME_ROOT, 'launcher'),
-    skins: path.join(GAME_ROOT, 'launcher', 'skins'),
+    launcher,
+    skins: path.join(launcher, 'skins'),
   };
+}
+
+/* ---------------- 便携目录（数据放启动器旁边，不放 C 盘） ---------------- */
+function portableBaseDir() {
+  if (!app.isPackaged) return null;
+  try {
+    const exe = app.getPath('exe');
+    if (process.platform === 'win32') return path.dirname(exe);            // NCL.exe 所在目录
+    if (process.platform === 'linux') {
+      const d = path.dirname(exe);
+      return path.basename(d) === 'engine' ? path.dirname(d) : d;          // engine/ 的上一级
+    }
+  } catch { /* 忽略，回退 userData */ }
+  return null; // macOS 保持 ~/Library/Application Support（App 包内不宜写数据）
+}
+function isWritableDir(dir) {
+  try {
+    ensureDir(dir);
+    const probe = path.join(dir, '.ncl-write-test');
+    fs.writeFileSync(probe, 'ok');
+    fs.unlinkSync(probe);
+    return true;
+  } catch { return false; }
+}
+/** 跨盘移动目录（copy + 删源） */
+function moveDir(src, dest) {
+  if (!exists(src)) return;
+  ensureDir(dest);
+  for (const entry of fs.readdirSync(src)) {
+    const from = path.join(src, entry), to = path.join(dest, entry);
+    if (fs.statSync(from).isDirectory()) moveDir(from, to);
+    else {
+      ensureDir(path.dirname(to));
+      fs.copyFileSync(from, to);
+      fs.unlinkSync(from);
+    }
+  }
+  try { fs.rmdirSync(src); } catch { /* 非空不强制删 */ }
+}
+/** 确定 GAME_ROOT / LAUNCHER_DIR，并把旧版（全部数据在 userData 下）迁到便携布局 */
+function initPaths() {
+  const base = portableBaseDir();
+  LAUNCHER_DIR = base && isWritableDir(base) ? path.join(base, '.ncl') : app.getPath('userData');
+  ensureDir(LAUNCHER_DIR);
+
+  // 1) 旧版启动器数据（<userData>/minecraft/launcher）搬到固定目录
+  const legacyRoot = path.join(app.getPath('userData'), 'minecraft');
+  const legacyLauncher = path.join(legacyRoot, 'launcher');
+  if (exists(legacyLauncher) && legacyLauncher !== LAUNCHER_DIR && !exists(path.join(LAUNCHER_DIR, 'settings.json'))) {
+    try { moveDir(legacyLauncher, LAUNCHER_DIR); } catch { /* 迁移失败按空启动，不致命 */ }
+  }
+
+  // 2) 游戏数据目录：环境变量（测试）> 用户自定义 > 便携默认（搬旧数据）> userData
+  const envRoot = process.env.CUBE_LAUNCHER_ROOT;
+  if (envRoot) { GAME_ROOT = envRoot; return; }
+  const s = loadSettings();
+  const custom = s.global && s.global.gameRoot;
+  if (custom) { GAME_ROOT = custom; return; }
+  if (base && isWritableDir(base)) {
+    const cand = path.join(base, '.minecraft');
+    if (!exists(cand) && exists(legacyRoot) && fs.readdirSync(legacyRoot).length) {
+      try { moveDir(legacyRoot, cand); } catch { /* 失败则继续用旧位置 */ }
+    }
+    GAME_ROOT = exists(cand) || !exists(legacyRoot) ? cand : legacyRoot;
+  } else {
+    GAME_ROOT = legacyRoot;
+  }
 }
 
 /* ---------------- 基础工具 ---------------- */
@@ -136,16 +212,44 @@ async function mapLimit(items, limit, fn) {
   return ret;
 }
 
+/** 异步递归复制目录（整合包 overrides 用，避免同步 IO 卡事件循环） */
+async function copyDirAsync(src, dest) {
+  ensureDir(dest);
+  const entries = await fs.promises.readdir(src, { withFileTypes: true });
+  for (const e of entries) {
+    const from = path.join(src, e.name), to = path.join(dest, e.name);
+    if (e.isDirectory()) await copyDirAsync(from, to);
+    else await fs.promises.copyFile(from, to);
+  }
+}
+
 function extractTarGz(file, dest) {
   return new Promise((resolve, reject) => {
     ensureDir(dest);
     execFile('tar', ['-xzf', file, '-C', dest], (err) => (err ? reject(err) : resolve()));
   });
 }
+/** 解压 zip：adm-zip 是全同步 API，放子进程跑，避免阻塞主进程事件循环
+ * （同步解压大整合包时主进程卡死，所有 IPC 挂起，界面像死机） */
 function extractZip(file, dest) {
-  ensureDir(dest);
-  const zip = new AdmZip(file);
-  zip.extractAllTo(dest, true);
+  return new Promise((resolve, reject) => {
+    let child;
+    try {
+      child = fork(path.join(__dirname, 'extract-worker.js'), [], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+    } catch (e) { reject(e); return; }
+    const timer = setTimeout(() => {
+      try { child.kill(); } catch { /* 已退出 */ }
+      reject(new Error('解压超时（超过 10 分钟）'));
+    }, 10 * 60 * 1000);
+    const finish = (fn, arg) => {
+      clearTimeout(timer);
+      try { child.disconnect(); } catch { /* 已断开 */ }
+      fn(arg);
+    };
+    child.on('message', (m) => finish(m.ok ? resolve : reject, m.ok ? undefined : new Error(m.error || '解压失败')));
+    child.on('error', (e) => finish(reject, e));
+    child.send({ file, dest });
+  });
 }
 
 /* ---------------- 规则求值（与 Mojang/authlib 一致） ---------------- */
@@ -557,7 +661,7 @@ function saveAccounts(d) { saveJSON(accountsPath(), d); }
 function loadSettings() {
   return loadJSON(settingsPath(), {
     selectedVersionId: null,
-    global: { memory: 2048, javaPath: '', width: 854, height: 480, fullscreen: false, jvmArgs: '', isolation: false, serverAddress: '', mirror: false, accent: 'pink' },
+    global: { memory: 2048, javaPath: '', width: 854, height: 480, fullscreen: false, jvmArgs: '', isolation: false, serverAddress: '', mirror: false, accent: 'pink', gameRoot: '', gameRootPrev: '' },
     perVersion: {},
   });
 }
@@ -784,7 +888,11 @@ async function installVersion(versionId, onProgress, mirrorBase = null) {
   await mapLimit(libs, 8, async ({ lib, artifact, mirrors }) => {
     const dest = path.join(P.libraries, artifact.path);
     // 镜像站：maven 库优先走 BMCLAPI /maven 前缀
-    const libMirrors = b ? [`${b}/maven/${artifact.path}`, ...(mirrors || []).filter((u) => u !== artifact.url)] : mirrors;
+    const libMirrors = b
+      ? [`${b}/maven/${artifact.path}`, ...(mirrors || []).filter((u) => u !== artifact.url)]
+      : (/maven\.fabricmc\.net/.test(artifact.url || '')
+        ? [...(mirrors || []), `https://bmclapi2.bangbang93.com/maven/${artifact.path}`] // Fabric 库国内回退 BMCLAPI
+        : mirrors);
     await downloadArtifact(dest, artifact, libMirrors);
     // 旧版 natives（LWJGL 3.3 之前）：下载分类器并解压
     if (lib.natives && lib.natives[osName()]) {
@@ -794,13 +902,13 @@ async function installVersion(versionId, onProgress, mirrorBase = null) {
         await downloadArtifact(zipPath, cls, [cls.url]);
         if (zipPath.endsWith('.zip')) {
           const tmp = path.join(P.libraries, 'natives-tmp', path.basename(zipPath, '.zip'));
-          extractZip(zipPath, tmp);
+          await extractZip(zipPath, tmp);
           for (const f of fs.readdirSync(tmp)) {
             if (f === 'META-INF') continue;
             const from = path.join(tmp, f), to = path.join(nativesDir, f);
             ensureDir(path.dirname(to));
-            if (exists(to)) fs.unlinkSync(to);
-            fs.renameSync(from, to);
+            if (exists(to)) await fs.promises.unlink(to);
+            await fs.promises.rename(from, to);
           }
           fs.rmSync(tmp, { recursive: true, force: true });
         }
@@ -851,12 +959,12 @@ async function installVersion(versionId, onProgress, mirrorBase = null) {
     if (aDone % 200 === 0 || aDone === entries.length) {
       onProgress({ stage: 'assets', message: `下载资源文件 (${aDone}/${entries.length})`, percent: Math.round((aDone / entries.length) * 100), speed: 0, loaded: aDone, total: entries.length });
     }
-    // 旧版 legacy 虚拟目录
+    // 旧版 legacy 虚拟目录（异步拷贝，避免大量小文件同步 IO 卡事件循环）
     if (indexId === 'legacy') {
       const vdest = path.join(P.assets, 'virtual', 'legacy', name);
       if (!exists(vdest)) {
         ensureDir(path.dirname(vdest));
-        try { fs.linkSync(dest, vdest); } catch { fs.copyFileSync(dest, vdest); }
+        try { await fs.promises.link(dest, vdest); } catch { await fs.promises.copyFile(dest, vdest); }
       }
     }
   });
@@ -870,11 +978,23 @@ async function installVersion(versionId, onProgress, mirrorBase = null) {
 }
 
 /* ---------------- Fabric 安装 ---------------- */
+/** 依次尝试多个 base（官方 meta → BMCLAPI 镜像），国内 meta.fabricmc.net 抽风时能装上 */
+async function fetchFirstJSON(paths_) {
+  let lastErr = null;
+  for (const u of paths_) {
+    try { return await fetchJSON(u); } catch (e) { lastErr = e; }
+  }
+  throw lastErr || new Error('所有源均请求失败');
+}
 async function installFabric(mcVersion, onProgress) {
-  const loaders = await fetchJSON(`https://meta.fabricmc.net/v2/versions/loader/${mcVersion}`);
+  const enc = encodeURIComponent(mcVersion);
+  const loaders = await fetchFirstJSON([`${FABRIC_META}/versions/loader/${enc}`, `${FABRIC_META_MIRROR}/versions/loader/${enc}`]);
   if (!loaders.length) throw new Error(`Fabric 不支持 ${mcVersion}`);
   const loader = loaders[0].loader.version;
-  const profile = await fetchJSON(`https://meta.fabricmc.net/v2/versions/loader/${mcVersion}/${loader}/profile/json`);
+  const profile = await fetchFirstJSON([
+    `${FABRIC_META}/versions/loader/${enc}/${encodeURIComponent(loader)}/profile/json`,
+    `${FABRIC_META_MIRROR}/versions/loader/${enc}/${encodeURIComponent(loader)}/profile/json`,
+  ]);
   profile.id = `fabric-loader-${loader}-${mcVersion}`;
   const vdir = path.join(paths().versions, profile.id);
   ensureDir(vdir);
@@ -886,6 +1006,16 @@ async function installFabric(mcVersion, onProgress) {
 const PLACEHOLDER_DOCS = {
   natives_directory: '', library_directory: '', classpath_separator: process.platform === 'win32' ? ';' : ':',
 };
+
+/** 内存上限安全钳制：小内存机器（如 4G）上即使设置里存了大值，也不让 JVM 因堆过大起不来 */
+function safeMemoryMB(want) {
+  const sysMB = Math.floor(os.totalmem() / 1024 / 1024);
+  let mb = Number(want) > 0 ? Math.floor(Number(want)) : 2048;
+  mb = Math.min(mb, 16384);
+  // 至少给系统留 512MB
+  mb = Math.min(mb, Math.max(512, sysMB - 512));
+  return mb;
+}
 
 function buildLaunchCommand(versionId, account, settings) {
   const P = paths();
@@ -946,7 +1076,7 @@ function buildLaunchCommand(versionId, account, settings) {
     // 旧版（minecraftArguments）没有 jvm 段，手动补关键参数
     jvmArgs.push(`-Djava.library.path=${nativesDir}`, '-cp', classpath);
   }
-  jvmArgs.push(`-Xmx${vs.memory || 2048}M`);
+  jvmArgs.push(`-Xmx${safeMemoryMB(vs.memory)}M`);
   // macOS：LWJGL/GLFW 要求 JVM 启动在主线程，否则窗口起不来（官方启动器同样处理）
   if (osName() === 'osx') jvmArgs.push('-XstartOnFirstThread');
   if (exists(log4jFile)) jvmArgs.push(`-Dlog4j.configurationFile=${log4jFile}`);
@@ -996,41 +1126,65 @@ function buildLaunchCommand(versionId, account, settings) {
 
 /* ---------------- 游戏进程管理 ---------------- */
 let gameProc = null;
+let launching = false; // 防止连点导致并发启动
 
 async function launchGame(versionId, onLog) {
+  if (launching) throw new Error('正在启动中，请稍候');
   if (gameProc) throw new Error('游戏已在运行');
-  const settings = loadSettings();
-  const { accounts, selectedId } = loadAccounts();
-  const account = accounts.find((a) => a.id === selectedId);
-  if (!account) throw new Error('请先登录账户');
-  const vjson = readLocalVersionJSON(versionId);
-  if (!vjson) throw new Error(`版本 ${versionId} 未安装`);
-  if (account.type === ACCOUNT_TYPES.YGGDRASIL) {
-    try { await yggdrasilRefresh(account); saveAccounts({ accounts, selectedId }); } catch { /*  refresh 失败也继续试启动 */ }
-  } else if (account.type === ACCOUNT_TYPES.MICROSOFT) {
-    try { await microsoftRefresh(account); saveAccounts({ accounts, selectedId }); } catch { /* 刷新失败也继续试启动 */ }
+  launching = true;
+  try {
+    const settings = loadSettings();
+    const { accounts, selectedId } = loadAccounts();
+    const account = accounts.find((a) => a.id === selectedId);
+    if (!account) throw new Error('请先登录账户');
+    const vjson = readLocalVersionJSON(versionId);
+    if (!vjson) throw new Error(`版本 ${versionId} 未安装`);
+    if (account.type === ACCOUNT_TYPES.YGGDRASIL) {
+      try { await yggdrasilRefresh(account); saveAccounts({ accounts, selectedId }); } catch { /*  refresh 失败也继续试启动 */ }
+    } else if (account.type === ACCOUNT_TYPES.MICROSOFT) {
+      try { await microsoftRefresh(account); saveAccounts({ accounts, selectedId }); } catch { /* 刷新失败也继续试启动 */ }
+    }
+    const cmd = buildLaunchCommand(versionId, account, settings);
+    const vs = versionSettings(settings, versionId);
+    // Java 缺失时会自动下载：把进度抛给渲染层，避免按钮假死像“没反应”
+    const java = await ensureJava(vjson, vs.javaPath, (p) => { if (win) win.webContents.send('launcher://progress', p); });
+    const finalArgs = [...cmd.jvmArgs, cmd.mainClass, ...cmd.gameArgs];
+
+    const env = { ...process.env };
+    if (process.platform === 'linux' && !env.LD_LIBRARY_PATH) env.LD_LIBRARY_PATH = cmd.nativesDir;
+
+    gameProc = spawn(java.path, finalArgs, { cwd: cmd.gameDir, env, detached: false });
+    const proc = gameProc;
+    const send = (line) => { try { onLog(line); } catch { /* 渲染层可能已销毁 */ } };
+    const onData = (buf) => buf.toString('utf8').split(/\r?\n/).filter(Boolean).forEach(send);
+    proc.stdout.on('data', onData);
+    proc.stderr.on('data', onData);
+    return await new Promise((resolve, reject) => {
+      let settled = false;
+      // spawn 失败（java 无效等）：必须清理状态并通知渲染层。
+      // 旧代码只监听 exit，spawn 失败时 exit 永不触发 → IPC 永久挂起 → 按钮假死
+      proc.on('error', (err) => {
+        if (settled) return;
+        settled = true;
+        gameProc = null;
+        if (win) win.webContents.send('launcher://game-exit', { code: null, error: `无法启动游戏进程：${err.message}` });
+        reject(new Error(`无法启动游戏进程：${err.message}`));
+      });
+      proc.on('exit', (code, signal) => {
+        if (settled) return;
+        settled = true;
+        gameProc = null;
+        resolve({ code, signal });
+      });
+    });
+  } finally {
+    launching = false;
   }
-  const cmd = buildLaunchCommand(versionId, account, settings);
-  const vs = versionSettings(settings, versionId);
-  const java = await ensureJava(vjson, vs.javaPath);
-  const finalArgs = [...cmd.jvmArgs, cmd.mainClass, ...cmd.gameArgs];
-
-  const env = { ...process.env };
-  if (process.platform === 'linux' && !env.LD_LIBRARY_PATH) env.LD_LIBRARY_PATH = cmd.nativesDir;
-
-  gameProc = spawn(java.path, finalArgs, { cwd: cmd.gameDir, env, detached: false });
-  const send = (line) => { try { onLog(line); } catch { /* 渲染层可能已销毁 */ } };
-  const onData = (buf) => buf.toString('utf8').split(/\r?\n/).filter(Boolean).forEach(send);
-  gameProc.stdout.on('data', onData);
-  gameProc.stderr.on('data', onData);
-  return new Promise((resolve) => {
-    gameProc.on('exit', (code) => { gameProc = null; resolve({ code }); });
-  });
 }
 
 function stopGame() {
   if (!gameProc) return false;
-  gameProc.kill();
+  try { gameProc.kill(); } catch { /* 已退出 */ }
   gameProc = null;
   return true;
 }
@@ -1069,7 +1223,8 @@ function createWindow() {
   const wikatb = process.env.CUBE_WIKITAB ? `&wtab=${encodeURIComponent(process.env.CUBE_WIKITAB)}` : '';
   const wikiq = process.env.CUBE_WIKIQ ? `&wikiq=${encodeURIComponent(process.env.CUBE_WIKIQ)}` : '';
   const wikidetail = process.env.CUBE_WIKIDETAIL ? `&wikidetail=1` : '';
-  const q = page ? `?page=${encodeURIComponent(page)}&dlhover=1${cat ? `&dlcat=${encodeURIComponent(cat)}` : ''}${src ? `&dlsrc=${encodeURIComponent(src)}` : ''}${scat ? `&scat=${encodeURIComponent(scat)}` : ''}${drop}${droptype}${wikiq}${wikatb}${wikiv}${wikidetail}` : `${drop}${droptype}${wikiq}${wikatb}${wikiv}${wikidetail}`.replace(/^&/, '?');
+  const modal = process.env.CUBE_MODAL ? `&modal=${encodeURIComponent(process.env.CUBE_MODAL)}` : '';
+  const q = page ? `?page=${encodeURIComponent(page)}&dlhover=1${cat ? `&dlcat=${encodeURIComponent(cat)}` : ''}${src ? `&dlsrc=${encodeURIComponent(src)}` : ''}${scat ? `&scat=${encodeURIComponent(scat)}` : ''}${drop}${droptype}${wikiq}${wikatb}${wikiv}${wikidetail}${modal}` : `${drop}${droptype}${wikiq}${wikatb}${wikiv}${wikidetail}${modal}`.replace(/^&/, '?');
   const indexUrl = pathToFileURL(path.join(__dirname, '..', 'renderer', 'index.html')).href + q;
   win.loadURL(indexUrl);
   // 调试用：CUBE_SCREENSHOT=/path/x.png 时启动后截图并退出（CUBE_DELAY 控制等待毫秒数，下载页需等网络请求）
@@ -1233,61 +1388,63 @@ async function installModpack(payload, onProgress) {
   } else {
     throw new Error('暂不支持一键安装该来源的整合包，请下载后手动导入');
   }
-  const zip = new AdmZip(packPath);
-  const indexEntry = zip.getEntry('modrinth.index.json');
-  if (!indexEntry) throw new Error('不是有效的 Modrinth 整合包（缺少 modrinth.index.json）');
-  const index = JSON.parse(indexEntry.getData().toString('utf8'));
+  // 先在子进程解压（adm-zip 全同步 API，主进程直接读大包会卡死界面），再从磁盘读索引
+  const extractDir = path.join(paths().launcher, 'tmp', `modpack-${Date.now()}`);
+  await extractZip(packPath, extractDir);
+  try {
+    const indexFile = path.join(extractDir, 'modrinth.index.json');
+    if (!exists(indexFile)) throw new Error('不是有效的 Modrinth 整合包（缺少 modrinth.index.json）');
+    const index = JSON.parse(fs.readFileSync(indexFile, 'utf8'));
 
-  // 1. 基础 MC 版本（未安装则先装）
-  const deps = index.dependencies || {};
-  const mc = deps.minecraft;
-  if (mc && !readLocalVersionJSON(mc)) {
-    onProgress({ stage: 'json', message: `安装基础版本 ${mc}`, percent: 0, speed: 0 });
-    await installVersion(mc, onProgress);
-  }
-  // Fabric 加载器
-  let fabricVersionId = null;
-  const fabricLoader = deps['fabric-loader'];
-  if (fabricLoader && mc) {
-    fabricVersionId = `fabric-loader-${fabricLoader}-${mc}`;
-    if (!readLocalVersionJSON(fabricVersionId)) {
-      onProgress({ stage: 'fabric', message: `安装 Fabric ${fabricLoader}`, percent: 0, speed: 0 });
-      try { await installFabric(mc, onProgress); } catch { fabricVersionId = null; }
+    // 1. 基础 MC 版本（未安装则先装）
+    const deps = index.dependencies || {};
+    const mc = deps.minecraft;
+    if (mc && !readLocalVersionJSON(mc)) {
+      onProgress({ stage: 'json', message: `安装基础版本 ${mc}`, percent: 0, speed: 0 });
+      await installVersion(mc, onProgress);
     }
-  }
+    // Fabric 加载器
+    let fabricVersionId = null;
+    const fabricLoader = deps['fabric-loader'];
+    if (fabricLoader && mc) {
+      fabricVersionId = `fabric-loader-${fabricLoader}-${mc}`;
+      if (!readLocalVersionJSON(fabricVersionId)) {
+        onProgress({ stage: 'fabric', message: `安装 Fabric ${fabricLoader}`, percent: 0, speed: 0 });
+        try { await installFabric(mc, onProgress); } catch { fabricVersionId = null; }
+      }
+    }
 
-  // 2. 索引中的全部文件（mod / 配置 / 资源）
-  const gameDir = contentGameDir();
-  const files = index.files || [];
-  let done = 0;
-  onProgress({ stage: 'files', message: `下载整合包文件 (0/${files.length})`, percent: 0, speed: 0 });
-  await mapLimit(files, 6, async (f) => {
-    const dest = path.join(gameDir, f.path);
-    done++;
-    if (exists(dest)) return;
-    const url = (f.downloads || [])[0];
-    if (!url) return;
-    ensureDir(path.dirname(dest));
-    await downloadFile(url, dest, { sha1: f.hashes && f.hashes.sha1, retries: 2 });
-    onProgress({ stage: 'files', message: `下载整合包文件 (${done}/${files.length})`, percent: Math.round((done / files.length) * 100), speed: 0 });
-  });
+    // 2. 索引中的全部文件（mod / 配置 / 资源）
+    const gameDir = contentGameDir();
+    const files = index.files || [];
+    let done = 0;
+    onProgress({ stage: 'files', message: `下载整合包文件 (0/${files.length})`, percent: 0, speed: 0 });
+    await mapLimit(files, 6, async (f) => {
+      const dest = path.join(gameDir, f.path);
+      done++;
+      if (exists(dest)) return;
+      const url = (f.downloads || [])[0];
+      if (!url) return;
+      ensureDir(path.dirname(dest));
+      await downloadFile(url, dest, { sha1: f.hashes && f.hashes.sha1, retries: 2 });
+      onProgress({ stage: 'files', message: `下载整合包文件 (${done}/${files.length})`, percent: Math.round((done / files.length) * 100), speed: 0 });
+    });
 
-  // 3. overrides 目录覆盖进游戏目录
-  for (const entry of zip.getEntries()) {
-    if (entry.isDirectory || !entry.entryName.startsWith('overrides/')) continue;
-    const rel = entry.entryName.slice('overrides/'.length);
-    const dest = path.join(gameDir, rel);
-    ensureDir(path.dirname(dest));
-    zip.extractEntryTo(entry, path.dirname(dest), false, true);
+    // 3. overrides 目录覆盖进游戏目录（异步递归复制，不卡事件循环）
+    const overridesDir = path.join(extractDir, 'overrides');
+    if (exists(overridesDir)) await copyDirAsync(overridesDir, gameDir);
+    onProgress({ stage: 'done', message: `整合包 ${path.basename(packPath)} 安装完成`, percent: 100, speed: 0 });
+    return { path: packPath, gameDir, mc, fabricVersionId };
+  } finally {
+    fs.rmSync(extractDir, { recursive: true, force: true });
   }
-  onProgress({ stage: 'done', message: `整合包 ${path.basename(packPath)} 安装完成`, percent: 100, speed: 0 });
-  return { path: packPath, gameDir, mc, fabricVersionId };
 }
 
 /* ---------------- Wiki 整合：版本资料聚合 ----------------
- * minecraft.wiki 全端点带反爬挑战（JS Proof-of-Work），应用内实时抓取不可行，
- * 因此采用「本地可验证数据 + 一键跳转浏览器」方案：
- * 应用内展示版本 JSON 中可验证的结构化信息，完整 wiki 资料用系统浏览器打开。 */
+ * minecraft.wiki 全端点带反爬挑战（JS Proof-of-Work），应用内实时抓取不可行；
+ * 因此结构化资料取版本 JSON（本地可验证），更新正文取 Mojang 官方补丁源
+ * （launchercontent.mojang.com/javaPatchNotes.json，无爬虫限制），
+ * 更老的版本（2020 前）补丁源没有收录，保留一键跳转浏览器兜底。 */
 async function wikiVersionInfo(versionId) {
   const manifest = await getManifest();
   const entry = (manifest.versions || []).find((v) => v.id === versionId);
@@ -1318,13 +1475,209 @@ async function wikiVersionInfo(versionId) {
   };
 }
 
+/* ---------------- Wiki：官方更新日志（Mojang 源，无爬虫限制） ---------------- */
+let patchNotesCache = null;
+
+async function getPatchNotes() {
+  if (patchNotesCache) return patchNotesCache;
+  const cacheFile = path.join(paths().launcher, 'patch-notes-cache.json');
+  const cached = loadJSON(cacheFile, null);
+  if (cached && cached.entries && Date.now() - (cached.savedAt || 0) < 7 * 864e5) {
+    patchNotesCache = cached;
+    return cached;
+  }
+  try {
+    const res = await fetch(PATCH_NOTES_URL, { headers: { 'User-Agent': 'NCL-Launcher' } });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    patchNotesCache = { savedAt: Date.now(), entries: data.entries || [] };
+    saveJSON(cacheFile, patchNotesCache);
+  } catch (e) {
+    if (cached && cached.entries) { patchNotesCache = cached; return cached; } // 网络失败用旧缓存
+    throw e;
+  }
+  return patchNotesCache;
+}
+
+/** HTML 白名单净化：官方源也防一手，链接统一新窗口打开 */
+const WIKI_ALLOWED_TAGS = new Set(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'a', 'strong', 'em', 'b', 'i', 'u', 's', 'code', 'pre', 'blockquote', 'br', 'hr', 'img', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'dl', 'dt', 'dd', 'span', 'div', 'small', 'sub', 'sup', 'figure', 'figcaption']);
+const WIKI_ALLOWED_ATTRS = {
+  a: ['href', 'title'],
+  img: ['src', 'alt', 'title', 'width', 'height'],
+  td: ['colspan', 'rowspan'], th: ['colspan', 'rowspan'],
+};
+function sanitizeWikiHtml(html) {
+  const src = String(html || '');
+  // 1) 整块删除危险标签及其内容
+  let out = src.replace(/<(script|style|iframe|object|embed|form|input|button|svg|math)\b[\s\S]*?<\/\1>/gi, '')
+    .replace(/<(script|style|iframe|object|embed|form|input|button|svg|math)\b[^>]*>/gi, '');
+  // 2) 逐标签处理
+  out = out.replace(/<\/?([a-zA-Z][a-zA-Z0-9]*)((?:[^>"']|"[^"]*"|'[^']*')*)>/g, (m, tag, attrs) => {
+    const name = tag.toLowerCase();
+    const closing = m.startsWith('</');
+    if (!WIKI_ALLOWED_TAGS.has(name)) return ''; // 非白名单标签去掉、保留内容
+    if (closing) return `</${name}>`;
+    const allowed = WIKI_ALLOWED_ATTRS[name] || [];
+    const kept = [];
+    const re = /([a-zA-Z-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/g;
+    let am;
+    while ((am = re.exec(attrs || ''))) {
+      const attr = am[1].toLowerCase();
+      const val = am[2] != null ? am[2] : am[3] != null ? am[3] : am[4] || '';
+      if (!allowed.includes(attr)) continue;
+      if ((attr === 'href' || attr === 'src')) {
+        const v = val.trim();
+        if (/^(javascript|vbscript|data):/i.test(v)) continue;             // 危险协议
+        if (attr === 'src' && !/^https?:\/\//i.test(v)) continue;          // 图片只允许 http(s)
+        kept.push(`${attr}="${v.replace(/"/g, '&quot;')}"`);
+      } else if (/^[\w\s.:-]*$/.test(val)) {
+        kept.push(`${attr}="${val.replace(/"/g, '&quot;')}"`);
+      }
+    }
+    if (name === 'a') { kept.push('target="_blank"', 'rel="noopener noreferrer"'); }
+    if (name === 'img') { kept.push('loading="lazy"', 'referrerpolicy="no-referrer"'); }
+    return `<${name}${kept.length ? ' ' + kept.join(' ') : ''}>`;
+  });
+  return out;
+}
+
+async function wikiPatchNotes(versionId) {
+  const notes = await getPatchNotes();
+  const entry = (notes.entries || []).find((e) => e.version === versionId) || null;
+  if (!entry) return { found: false };
+  return {
+    found: true,
+    entry: {
+      title: entry.title || versionId,
+      type: entry.type || '',
+      version: entry.version || versionId,
+      body: sanitizeWikiHtml(entry.body || ''),
+      image: entry.image && entry.image.url ? `https://launchercontent.mojang.com${entry.image.url}` : null,
+    },
+  };
+}
+
+/* ---------------- 检查更新（GitHub Releases） ---------------- */
+function semverCmp(a, b) {
+  const pa = String(a).replace(/^v/, '').split('.').map((x) => parseInt(x, 10) || 0);
+  const pb = String(b).replace(/^v/, '').split('.').map((x) => parseInt(x, 10) || 0);
+  for (let i = 0; i < 3; i++) { const d = (pa[i] || 0) - (pb[i] || 0); if (d) return d; }
+  return 0;
+}
+function platformAssetRe() {
+  if (process.platform === 'win32') return /-win64\.zip$/;
+  if (process.platform === 'linux') return /-linux-x64\.tar\.gz$/;
+  if (process.platform === 'darwin') return process.arch === 'arm64' ? /-macos-arm64\.zip$/ : /-macos-x64\.zip$/;
+  return null;
+}
+async function updaterCheck() {
+  const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`, {
+    headers: { 'User-Agent': 'NCL-Launcher', Accept: 'application/vnd.github+json' },
+  });
+  if (!res.ok) throw new Error(`查询 GitHub 失败 (HTTP ${res.status})`);
+  const rel = await res.json();
+  const latest = String(rel.tag_name || '').replace(/^v/, '');
+  const re = platformAssetRe();
+  const asset = (rel.assets || []).find((a) => re && re.test(a.name)) || null;
+  return {
+    hasUpdate: semverCmp(latest, LAUNCHER_VERSION) > 0,
+    current: LAUNCHER_VERSION,
+    latest,
+    notes: rel.body || '',
+    publishedAt: rel.published_at || '',
+    url: rel.html_url || '',
+    asset: asset ? { name: asset.name, size: asset.size, url: asset.browser_download_url } : null,
+  };
+}
+async function updaterDownload(onProgress) {
+  const info = await updaterCheck();
+  if (!info.hasUpdate) return { ok: false, error: '当前已是最新版本' };
+  if (!info.asset) return { ok: false, error: `未找到适用于本平台的安装包（${process.platform}/${process.arch}）` };
+  const dir = path.join(paths().launcher, 'updates');
+  ensureDir(dir);
+  const dest = path.join(dir, info.asset.name);
+  const tmp = dest + '.part';
+  await downloadFile(info.asset.url, tmp, {
+    timeout: 600000,
+    onProgress: (p) => onProgress && onProgress({ ...p, stage: 'update', message: `下载 ${info.asset.name} ${p.percent || 0}%` }),
+  });
+  fs.renameSync(tmp, dest);
+  return { ok: true, file: dest, info };
+}
+
+/** 平台更新脚本：等待旧进程退出 → 用 stage 里的新文件覆盖 → 重启启动器 */
+function buildUpdaterScript(kind, stage, target, pid) {
+  if (kind === 'bat') {
+    return `@echo off\r\nchcp 65001 >nul\r\n:wait\r\ntasklist /FI "PID eq ${pid}" 2>nul | find /i "${pid}" >nul\r\nif not errorlevel 1 (timeout /t 1 /nobreak >nul & goto wait)\r\nxcopy "${stage}" "${target}" /E /I /H /Y /Q >nul\r\nstart "" "${target}\\NCL.exe"\r\n`;
+  }
+  // sh（Linux / macOS 通用）
+  const relaunch = kind === 'sh-mac' ? `open "${target}"` : `"${target}/NCL.sh"`;
+  return `#!/bin/bash
+while kill -0 ${pid} 2>/dev/null; do sleep 0.5; done
+sleep 1
+rm -rf "${target}/engine"
+cp -a "${stage}/." "${target}/" 2>/dev/null
+${relaunch}
+`;
+}
+async function updaterApply() {
+  const s = loadSettings();
+  const pending = s.global && s.global.pendingUpdate;
+  if (!pending || !exists(pending.file)) return { ok: false, error: '没有待安装的更新包' };
+  const stage = path.join(paths().launcher, 'updates', 'stage');
+  fs.rmSync(stage, { recursive: true, force: true });
+  ensureDir(stage);
+  if (/\.zip$/.test(pending.file)) await extractZip(pending.file, stage);
+  else if (/\.tar\.gz$/.test(pending.file)) await extractTarGz(pending.file, stage);
+  else return { ok: false, error: '不支持的安装包格式' };
+
+  // 定位解压出的启动器根（不同平台包结构不一样）
+  let target, kind;
+  if (process.platform === 'win32') {
+    const inner = path.join(stage, 'NCL');
+    target = portableBaseDir();
+    kind = 'bat';
+    if (!exists(path.join(inner, 'NCL.exe'))) return { ok: false, error: '安装包内未找到 NCL.exe' };
+  } else if (process.platform === 'linux') {
+    target = portableBaseDir();
+    kind = 'sh';
+    if (!exists(path.join(stage, 'NCL.sh'))) return { ok: false, error: '安装包内未找到 NCL.sh' };
+  } else {
+    // macOS：解压出 NCL.app，替换 .app 所在目录
+    const appPath = app.getPath('exe').replace(/\/Contents\/MacOS\/[^/]+$/, '');
+    target = path.dirname(appPath);
+    kind = 'sh-mac';
+    if (!exists(path.join(stage, 'NCL.app'))) return { ok: false, error: '安装包内未找到 NCL.app' };
+  }
+  if (!target) return { ok: false, error: '无法定位启动器目录' };
+
+  const scriptPath = path.join(path.join(paths().launcher, 'updates'), kind === 'bat' ? 'apply-update.bat' : 'apply-update.sh');
+  const stageSrc = process.platform === 'win32' ? path.join(stage, 'NCL') : stage;
+  fs.writeFileSync(scriptPath, buildUpdaterScript(kind, stageSrc, target, process.pid));
+  if (kind !== 'bat') fs.chmodSync(scriptPath, 0o755);
+
+  // 清理 pending 标记，退出并交给脚本
+  const s2 = loadSettings();
+  if (s2.global) delete s2.global.pendingUpdate;
+  saveSettings(s2);
+
+  const child = kind === 'bat'
+    ? spawn('cmd.exe', ['/c', scriptPath], { detached: true, stdio: 'ignore', windowsVerbatimArguments: true })
+    : spawn('/bin/bash', [scriptPath], { detached: true, stdio: 'ignore' });
+  child.unref();
+  app.quit();
+  return { ok: true };
+}
+
 function getState() {
   const settings = loadSettings();
   const { accounts, selectedId } = loadAccounts();
   const account = accounts.find((a) => a.id === selectedId) || null;
   return {
     gameRoot: GAME_ROOT,
+    launcherDir: LAUNCHER_DIR,
     launcherVersion: LAUNCHER_VERSION,
+    sysMemoryMB: Math.floor(os.totalmem() / 1024 / 1024),
     accounts: accounts.map((a) => ({ ...a, accessToken: undefined })),
     selectedAccount: account ? { ...account, accessToken: undefined } : null,
     settings,
@@ -1462,8 +1815,9 @@ function registerIPC() {
   ipcMain.handle('game:launch', async (_, versionId) => {
     try {
       const promise = launchGame(versionId, (line) => { if (win) win.webContents.send('launcher://game-log', line); });
-      // 后台运行，立即返回；退出事件另行通知
-      promise.then(({ code }) => { if (win) win.webContents.send('launcher://game-exit', code); });
+      // 后台运行，立即返回；退出/失败事件另行通知
+      promise.then(({ code, signal }) => { if (win) win.webContents.send('launcher://game-exit', { code, signal }); });
+      promise.catch((e) => { if (win) win.webContents.send('launcher://game-exit', { code: null, error: e.message }); });
       return { ok: true };
     } catch (e) {
       return { ok: false, error: e.message };
@@ -1501,13 +1855,85 @@ function registerIPC() {
     }
   });
 
-  ipcMain.handle('shell:openExternal', (_, url) => shell.openExternal(url));
+  /* 打开系统文件管理器中的文件夹（用 shell.openPath，跨平台且不需要拼 file:// URL） */
+  ipcMain.handle('shell:openPath', async (_, p) => {
+    try {
+      const err = await shell.openPath(String(p || ''));
+      return err ? { ok: false, error: err } : { ok: true };
+    } catch (e) { return { ok: false, error: e.message }; }
+  });
+
+  ipcMain.handle('shell:openExternal', async (_, url) => {
+    try { await shell.openExternal(String(url)); return { ok: true }; }
+    catch (e) { return { ok: false, error: e.message }; }
+  });
+
+  /* 游戏目录：选择 / 切换 / 迁移旧数据 */
+  ipcMain.handle('dialog:pickGameRoot', async () => {
+    const r = await dialog.showOpenDialog(win, { title: '选择游戏目录', buttonLabel: '选择', properties: ['openDirectory', 'createDirectory'] });
+    if (r.canceled || !r.filePaths[0]) return null;
+    return r.filePaths[0];
+  });
+  ipcMain.handle('launcher:setGameRoot', async (_, newRoot) => {
+    newRoot = String(newRoot || '').trim();
+    if (!newRoot) return { ok: false, error: '目录不能为空' };
+    if (newRoot === GAME_ROOT) return { ok: true, state: getState() };
+    try {
+      const prev = GAME_ROOT;
+      ensureDir(newRoot);
+      GAME_ROOT = newRoot;
+      for (const p of Object.values(paths())) ensureDir(p);
+      const s = loadSettings();
+      s.global = { ...(s.global || {}), gameRoot: newRoot, gameRootPrev: prev };
+      saveSettings(s);
+      return { ok: true, state: getState() };
+    } catch (e) { return { ok: false, error: e.message }; }
+  });
+  ipcMain.handle('launcher:migrateGameRoot', async () => {
+    const s = loadSettings();
+    const prev = s.global && s.global.gameRootPrev;
+    if (!prev || !exists(prev)) return { ok: false, error: '没有可迁移的旧数据' };
+    try {
+      const cur = GAME_ROOT;
+      if (exists(cur) && fs.readdirSync(cur).length) return { ok: false, error: '当前游戏目录不为空，请手动搬运' };
+      moveDir(prev, cur);
+      return { ok: true, state: getState() };
+    } catch (e) { return { ok: false, error: e.message }; }
+  });
 
   /* Wiki 整合：版本结构化资料（本地可验证数据，完整资料跳转 minecraft.wiki） */
   ipcMain.handle('wiki:versionInfo', async (_, versionId) => {
     try {
       return { ok: true, info: await wikiVersionInfo(versionId) };
     } catch (e) { return { ok: false, error: e.message }; }
+  });
+
+  /* Wiki 整合：官方更新日志（Mojan 源，无爬虫限制，直接页内渲染） */
+  ipcMain.handle('wiki:patchNotes', async (_, versionId) => {
+    try {
+      return { ok: true, notes: await wikiPatchNotes(versionId) };
+    } catch (e) { return { ok: false, error: e.message }; }
+  });
+
+  /* 检查更新：查询 GitHub Releases，比对版本 */
+  ipcMain.handle('updater:check', async () => {
+    try { return { ok: true, info: await updaterCheck() }; }
+    catch (e) { return { ok: false, error: e.message }; }
+  });
+  ipcMain.handle('updater:download', async () => {
+    try {
+      const r = await updaterDownload((p) => { if (win) win.webContents.send('launcher://up-progress', p); });
+      if (r.ok) {
+        const s = loadSettings();
+        s.global = { ...(s.global || {}), pendingUpdate: { file: r.file, version: r.info.latest } };
+        saveSettings(s);
+      }
+      return r;
+    } catch (e) { return { ok: false, error: e.message }; }
+  });
+  ipcMain.handle('updater:apply', async () => {
+    try { return await updaterApply(); }
+    catch (e) { return { ok: false, error: e.message }; }
   });
 
   /* ---------- 本地导入（按钮选择 / 拖拽放入共用） ---------- */
@@ -1569,12 +1995,20 @@ if (process.env.CUBE_TEST_MODE !== '1') {
   app.on('second-instance', () => { if (win) win.focus(); });
 
   app.whenReady().then(() => {
-    const envRoot = process.env.CUBE_LAUNCHER_ROOT;
-    GAME_ROOT = envRoot || path.join(app.getPath('userData'), 'minecraft');
+    initPaths();
     for (const p of Object.values(paths())) ensureDir(p);
     registerIPC();
     createWindow();
     app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+    // 启动后静默检查更新：只通知，不自动下载（用户点「检查更新」才下载）
+    setTimeout(async () => {
+      try {
+        const info = await updaterCheck();
+        if (info.hasUpdate && win) {
+          win.webContents.send('launcher://up-available', { latest: info.latest, current: info.current, url: info.url });
+        }
+      } catch { /* 网络失败静默跳过 */ }
+    }, 4000);
   });
 
   app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
@@ -1589,10 +2023,12 @@ module.exports = {
   buildLaunchCommand, ensureJava, installMojangRuntime, installVersion, installFabric,
   launchGame, stopGame, parseJavaMajor,
   versionSettings, loadSettings, loadAccounts, readLocalVersionJSON,
-  javaPlatformKey,
+  javaPlatformKey, safeMemoryMB, semverCmp, sanitizeWikiHtml, platformAssetRe,
   modrinthSearch, modrinthProject, vanillaList,
-  wikiVersionInfo,
+  wikiVersionInfo, wikiPatchNotes,
+  updaterCheck,
   installContent, installSingleFile, installModpack, contentGameDir, DL_CATEGORIES, BMCLAPI,
   setGameRoot: (r) => { GAME_ROOT = r; for (const p of Object.values(paths())) ensureDir(p); },
+  setLauncherDir: (d) => { LAUNCHER_DIR = d; ensureDir(d); },
   paths,
 };

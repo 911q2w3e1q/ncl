@@ -13,12 +13,13 @@ const DEFAULT_SKINS = {
 /* ================= mock 预览模式 ================= */
 const mockState = {
   gameRoot: '/预览模式',
-  launcherVersion: '1.0.0',
+  launcherVersion: '1.2.0',
+  sysMemoryMB: 16384,
   accounts: [{ id: 'mock-1', type: 'offline', name: 'Steve', uuid: '8f14e45f-ceea-467a-9f0c-8b8b0b0a1b2c', skinUrl: null, capeUrl: null, model: null }],
   selectedAccount: { id: 'mock-1', type: 'offline', name: 'Steve', uuid: '8f14e45f-ceea-467a-9f0c-8b8b0b0a1b2c', skinUrl: null, capeUrl: null, model: null },
   settings: {
     selectedVersionId: '1.20.1',
-    global: { memory: 4096, javaPath: '', width: 854, height: 480, fullscreen: false, jvmArgs: '', isolation: false, serverAddress: '', mirror: false, accent: 'pink' },
+    global: { memory: 4096, javaPath: '', width: 854, height: 480, fullscreen: false, jvmArgs: '', isolation: false, serverAddress: '', mirror: false, accent: 'pink', gameRoot: '/预览模式/.minecraft', gameRootPrev: '/预览模式/旧目录' },
     perVersion: {},
   },
   installed: [
@@ -132,9 +133,68 @@ const mockApi = (channel, ...args) => new Promise((resolve) => {
         resolve({ ok: true });
         const lines = ['[NCL] 预览模式：模拟启动中…', 'Setting user: Steve', 'Loaded 88 libraries', 'LWJGL Version: 3.3.3', 'Backend library: LWJGL 3.3.3 SNAPSHOT', 'OpenAL initialized.', 'Narrator library loaded.', 'Created: 1024x512 textures-atlas'];
         lines.forEach((l, i) => setTimeout(() => (mockListeners['launcher://game-log'] || []).forEach((cb) => cb(l)), 350 * (i + 1)));
+        setTimeout(() => (mockListeners['launcher://game-exit'] || []).forEach((cb) => cb({ code: 0, signal: null })), 350 * (lines.length + 1) + 800);
         break;
       }
-      case 'game:stop': resolve({ ok: true }); break;
+      case 'game:stop': {
+        setTimeout(() => (mockListeners['launcher://game-exit'] || []).forEach((cb) => cb({ code: 0, signal: null })), 120);
+        resolve({ ok: true }); break;
+      }
+      case 'shell:openPath': resolve({ ok: true }); break;
+      case 'dialog:pickGameRoot': resolve('/预览模式/新的游戏目录'); break;
+      case 'launcher:setGameRoot': { mockState.gameRoot = args[0]; mockState.settings.global.gameRootPrev = '/预览模式/.minecraft'; mockState.settings.global.gameRoot = args[0]; resolve({ ok: true, state: JSON.parse(JSON.stringify(mockState)) }); break; }
+      case 'launcher:migrateGameRoot': { mockState.settings.global.gameRootPrev = ''; resolve({ ok: true, state: JSON.parse(JSON.stringify(mockState)) }); break; }
+      case 'wiki:patchNotes': {
+        const id = args[0] || '1.20.1';
+        resolve({
+          ok: true,
+          notes: {
+            found: true,
+            entry: {
+              title: `Java Edition ${id}`,
+              type: 'release',
+              version: id,
+              image: null,
+              body:
+                '<p><strong>更改</strong></p>' +
+                `<p>${id} 是 Minecraft 的一个版本更新（此为浏览器预览用的示例正文，实际内容来自 Mojang 官方更新日志）。</p>` +
+                '<ul><li>新增与调整的游戏特性</li><li>方块、物品与生物的改动</li><li>技术性更改与漏洞修复</li></ul>' +
+                '<p>更多细节可点击下方按钮前往 Minecraft Wiki 查看完整条目。</p>',
+            },
+          },
+        });
+        break;
+      }
+      case 'updater:check': {
+        const noUpd = new URLSearchParams(location.search).get('upd') === 'noupd';
+        resolve({
+          ok: true,
+          info: {
+            hasUpdate: !noUpd,
+            current: '1.2.0',
+            latest: noUpd ? '1.2.0' : '1.3.0',
+            notes: noUpd ? '' : '## NCL 1.3.0\n\n- 新增：启动器检查更新后可一键下载并安装\n- 优化：版本弹窗 Fabric 列表支持全量搜索\n- 修复：切换游戏目录后旧数据迁移入口\n\n[查看完整说明](https://github.com/911q2w3e1q/ncl/releases)',
+            publishedAt: new Date().toISOString(),
+            url: 'https://github.com/911q2w3e1q/ncl/releases/latest',
+            asset: noUpd ? null : { name: 'NCL-1.3.0-win64.zip', size: 140000000, url: 'https://example.invalid/mock.zip' },
+          },
+        });
+        break;
+      }
+      case 'updater:download': {
+        let p = 0;
+        const timer = setInterval(() => {
+          p += Math.random() * 22;
+          (mockListeners['launcher://up-progress'] || []).forEach((cb) => cb({ stage: 'update', percent: Math.min(99, Math.round(p)), speed: 3.5 * 1048576, received: Math.min(99, Math.round(p)) * 1.4e6, total: 1.4e8, message: `下载 NCL-1.3.0-win64.zip ${Math.min(99, Math.round(p))}%` }));
+        }, 350);
+        setTimeout(() => {
+          clearInterval(timer);
+          (mockListeners['launcher://up-progress'] || []).forEach((cb) => cb({ stage: 'done', percent: 100, message: '下载完成', received: 1.4e8, total: 1.4e8 }));
+          resolve({ ok: true, file: '/预览模式/NCL-1.3.0-win64.zip', info: { latest: '1.3.0' } });
+        }, 2600);
+        break;
+      }
+      case 'updater:apply': resolve({ ok: true }); break;
       case 'download:search': {
         const opts = args[0] || {};
         if (opts.category === 'vanilla') {
@@ -169,6 +229,7 @@ let state = null;
 let manifestCache = null;
 let installing = null; // { id, percent }
 let logLines = 0;
+let currentPage = 'game'; // 当前激活页面（refresh 时按需同步对应子页面）
 
 const $ = (id) => document.getElementById(id);
 const fmtBytes = (b) => (b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : (b / 1024).toFixed(0) + ' KB');
@@ -214,13 +275,15 @@ function drawAvatar(dataURL) {
 /* ================= 账户卡片 ================= */
 async function renderAccountCard() {
   const acc = state.selectedAccount;
-  const nameEl = $('acc-name'), typeEl = $('acc-type'), uuidEl = $('acc-uuid'), texEl = $('acc-tex'), apiEl = $('acc-api');
+  const nameEl = $('acc-name'), typeEl = $('acc-type'), uuidEl = $('acc-uuid'), texEl = $('acc-tex');
   if (!acc) {
     nameEl.textContent = '未登录';
     typeEl.textContent = '离线'; typeEl.className = 'badge badge-offline';
     uuidEl.textContent = '—';
-    texEl.innerHTML = '<span class="tex-item">皮肤模型：<b>—</b></span><span class="tex-item">披风：<b>—</b></span>';
-    apiEl.textContent = '接口：—';
+    texEl.innerHTML =
+      '<span class="tex-item">皮肤模型：<b>—</b></span>' +
+      '<span class="tex-item">披风：<b>—</b></span>' +
+      '<span class="tex-item" id="acc-api">接口：—</span>';
     $('btn-account').textContent = '登录账户';
     drawAvatar(DEFAULT_SKINS.steve);
     return;
@@ -234,8 +297,12 @@ async function renderAccountCard() {
   texEl.innerHTML =
     `<span class="tex-item">皮肤模型：<b>${acc.model === 'slim' ? 'Alex（纤细）' : acc.model === 'default' ? 'Steve（经典）' : '默认'}</b></span>` +
     `<span class="tex-item">披风：<b>${acc.capeUrl ? '已佩戴' : '无'}</b></span>` +
-    `<span class="tex-item">上次登录：<b>${acc.lastLoginAt ? new Date(acc.lastLoginAt).toLocaleString('zh-CN', { hour12: false }) : '本地'}</b></span>`;
-  apiEl.textContent = '接口：' + (isMs ? 'Microsoft' : isYs ? acc.apiRoot : '离线模式');
+    `<span class="tex-item">上次登录：<b>${acc.lastLoginAt ? new Date(acc.lastLoginAt).toLocaleString('zh-CN', { hour12: false }) : '本地'}</b></span>` +
+    '<span class="tex-item" id="acc-api"></span>';
+  // 注意：acc-api 必须放进上面的 innerHTML 模板。此前模板里漏了它，
+  // innerHTML 重建会把原 acc-api 元素销毁，再引用就空引用崩溃（LittleSkin 登录报错根因）。
+  const apiEl = $('acc-api');
+  if (apiEl) apiEl.textContent = '接口：' + (isMs ? 'Microsoft' : isYs ? acc.apiRoot : '离线模式');
   $('btn-account').textContent = '管理账户';
   if (acc.skinUrl) {
     try { drawAvatar(await api('skin:fetch', acc.skinUrl)); } catch { drawAvatar(null); }
@@ -258,6 +325,11 @@ function renderVersionCard() {
 }
 
 /* ================= 版本设置卡片（点击打开设置弹窗） ================= */
+/* 内存滑块上限：按系统实际内存封顶（与主进程 safeMemoryMB 同一口径：至少给系统留 512MB） */
+function sysMemMaxGB() {
+  const sysMB = (state && state.sysMemoryMB) || 8192;
+  return Math.max(2, Math.min(32, Math.floor((sysMB - 512) / 1024)));
+}
 function currentVS() {
   const vid = state.settings.selectedVersionId;
   const g = state.settings.global;
@@ -266,8 +338,11 @@ function currentVS() {
 }
 function renderSettingsCard() {
   const vs = currentVS();
-  const memGB = Math.max(1, Math.round((vs.memory || 2048) / 1024));
-  $('set-memory').value = Math.min(16, memGB);
+  const maxGB = sysMemMaxGB();
+  const memGB = Math.max(1, Math.min(maxGB, Math.round((vs.memory || 2048) / 1024)));
+  const slider = $('set-memory');
+  slider.max = maxGB;
+  slider.value = memGB;
   $('set-memory-val').textContent = memGB + ' GB';
   $('set-width').value = vs.width;
   $('set-height').value = vs.height;
@@ -339,11 +414,14 @@ function renderSettingsPage() {
   if (!state || !state.settings) return;
   const g = state.settings.global || {};
   // 内存
-  const memGB = Math.max(1, Math.min(16, Math.round((g.memory || 2048) / 1024)));
-  $('sp-memory').value = memGB;
+  const maxGB = sysMemMaxGB();
+  const memGB = Math.max(1, Math.min(maxGB, Math.round((g.memory || 2048) / 1024)));
+  const spMem = $('sp-memory');
+  spMem.max = maxGB;
+  spMem.value = memGB;
   $('sp-memory-val').textContent = memGB + ' GB';
-  const pct = ((memGB - 1) / 15) * 100;
-  $('sp-memory').style.setProperty('--range-pct', pct + '%');
+  const pct = ((memGB - 1) / (maxGB - 1)) * 100;
+  spMem.style.setProperty('--range-pct', pct + '%');
   // Java
   const js = $('sp-java-status');
   if (g.javaPath) { js.textContent = g.javaPath; js.title = g.javaPath; $('sp-btn-java-auto').hidden = false; }
@@ -363,6 +441,10 @@ function renderSettingsPage() {
   // 启动器信息
   $('sp-gameroot').textContent = state.gameRoot || '—';
   $('sp-gameroot').title = state.gameRoot || '';
+  // 有旧目录待迁移数据时才显示「迁移旧数据」
+  const prev = (state.settings.global || {}).gameRootPrev;
+  const mig = $('sp-btn-migrate-root');
+  if (mig) mig.hidden = !prev;
   $('sp-about-version').textContent = 'v' + (state.launcherVersion || '1.0.0');
   // 账户
   const list = $('sp-account-list');
@@ -390,7 +472,7 @@ function bindSettingsPage() {
   $('sp-memory').addEventListener('input', (e) => {
     const v = Number(e.target.value);
     $('sp-memory-val').textContent = v + ' GB';
-    e.target.style.setProperty('--range-pct', ((v - 1) / 15) * 100 + '%');
+    e.target.style.setProperty('--range-pct', ((v - 1) / (Number(e.target.max) - 1)) * 100 + '%');
   });
   $('sp-memory').addEventListener('change', (e) => save({ memory: Number(e.target.value) * 1024 }));
   // Java
@@ -419,16 +501,144 @@ function bindSettingsPage() {
       toast('主题强调色已更新', true);
     };
   });
-  // 打开游戏目录
-  $('sp-btn-open-root').addEventListener('click', () => {
-    if (state.gameRoot) api('shell:openExternal', 'file://' + encodeURI(state.gameRoot));
+  // 打开游戏目录（shell.openPath：直接调系统文件管理器，跨平台不拼 file:// URL）
+  $('sp-btn-open-root').addEventListener('click', async () => {
+    if (!state.gameRoot) return toast('尚未设置游戏目录');
+    const r = await api('shell:openPath', state.gameRoot);
+    if (r && r.ok === false) toast('打开文件夹失败：' + (r.error || '未知错误'));
   });
-  // 检查更新（占位：尚无更新服务）
-  $('sp-btn-check-update').addEventListener('click', () => {
-    toast(`当前已是最新版本 v${state.launcherVersion || '1.0.0'}`, true);
+  // 更改游戏目录
+  $('sp-btn-change-root').addEventListener('click', async () => {
+    const dir = await api('dialog:pickGameRoot');
+    if (!dir) return;
+    const r = await api('launcher:setGameRoot', dir);
+    if (!r || !r.ok) return toast('切换目录失败：' + ((r && r.error) || '未知错误'));
+    state = r.state || state;
+    toast('游戏目录已切换，重启后旧数据可通过「迁移旧数据」搬入', true);
+    renderSettingsPage();
   });
+  // 迁移旧目录数据
+  $('sp-btn-migrate-root').addEventListener('click', async () => {
+    const r = await api('launcher:migrateGameRoot');
+    if (!r || !r.ok) return toast('迁移失败：' + ((r && r.error) || '未知错误'));
+    state = r.state || state;
+    toast('旧数据已迁移到新游戏目录', true);
+    await refresh();
+  });
+  // 检查更新（GitHub Releases）
+  $('sp-btn-check-update').addEventListener('click', () => checkUpdate(true));
   // 打开账户管理
   $('sp-btn-open-account').addEventListener('click', () => openAccountModal());
+}
+
+/* ================= 检查更新 ================= */
+const up = { checking: false, downloading: false, info: null };
+function fmtUpdateNotes(md) {
+  // Release 说明是 Markdown：转义后做最小渲染（标题/列表/链接/加粗/换行），够读且安全
+  const lines = String(md || '').split(/\r?\n/);
+  const escHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const inline = (s) => escHtml(s)
+    .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="#" data-url="$2">$1</a>')
+    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>');
+  const out = [];
+  let inList = false;
+  for (const raw of lines) {
+    const line = raw.trimEnd();
+    if (/^\s*[-*]\s+/.test(line)) {
+      if (!inList) { out.push('<ul>'); inList = true; }
+      out.push(`<li>${inline(line.replace(/^\s*[-*]\s+/, ''))}</li>`);
+      continue;
+    }
+    if (inList) { out.push('</ul>'); inList = false; }
+    if (!line.trim()) continue;
+    if (/^#{1,4}\s+/.test(line)) out.push(`<div class="un-h">${inline(line.replace(/^#{1,4}\s+/, ''))}</div>`);
+    else out.push(`<p>${inline(line)}</p>`);
+  }
+  if (inList) out.push('</ul>');
+  return out.join('') || '<p class="dim">该版本没有提供说明</p>';
+}
+async function checkUpdate(manual) {
+  if (up.checking || up.downloading) return;
+  up.checking = true;
+  const btn = $('sp-btn-check-update');
+  if (btn) { btn.disabled = true; btn.textContent = '检查中…'; }
+  try {
+    const r = await api('updater:check');
+    if (!r || r.ok === false) { toast('检查更新失败：' + ((r && r.error) || '未知错误')); return; }
+    up.info = r.info;
+    if (!r.info.hasUpdate) {
+      if (manual !== false) toast(`当前已是最新版本 v${r.info.current}`, true);
+      return;
+    }
+    openUpdateModal(r.info);
+  } catch (e) {
+    toast('检查更新失败：' + ((e && e.message) || e));
+  } finally {
+    up.checking = false;
+    if (btn) { btn.disabled = false; btn.textContent = '检查更新'; }
+  }
+}
+function openUpdateModal(info) {
+  up.info = info;
+  $('um-cur').textContent = 'v' + (info.current);
+  $('um-new').textContent = 'v' + info.latest;
+  $('um-notes').innerHTML = fmtUpdateNotes(info.notes);
+  // Release 说明里的链接：委托打开系统浏览器
+  $('um-notes').onclick = (e) => {
+    const a = e.target.closest('a[data-url]');
+    if (a) { e.preventDefault(); api('shell:openExternal', a.dataset.url); }
+  };
+  const asset = $('um-asset');
+  asset.textContent = info.asset ? `${info.asset.name} · ${fmtBytes(info.asset.size)}` : '未找到适用于本平台的安装包';
+  const dlBtn = $('um-btn-download');
+  dlBtn.disabled = !info.asset;
+  dlBtn.textContent = info.asset ? '下载并安装' : '无可用安装包';
+  $('um-progress').hidden = true;
+  $('um-open').onclick = () => api('shell:openExternal', info.url);
+  $('modal-update').hidden = false;
+}
+function bindUpdateModal() {
+  $('um-btn-download').addEventListener('click', async () => {
+    if (up.downloading) return;
+    up.downloading = true;
+    const btn = $('um-btn-download');
+    btn.disabled = true; btn.textContent = '下载中 0%';
+    $('um-progress').hidden = false;
+    $('um-pfill').style.width = '0%';
+    $('um-ptext').textContent = '正在连接…';
+    try {
+      const r = await api('updater:download');
+      if (!r || !r.ok) {
+        toast('下载失败：' + ((r && r.error) || '未知错误'));
+        btn.textContent = '重试下载';
+        return;
+      }
+      $('um-pfill').style.width = '100%';
+      $('um-ptext').textContent = '下载完成，可以安装了';
+      btn.textContent = '立即重启并安装';
+      btn.disabled = false;
+      btn.onclick = async () => {
+        btn.disabled = true; btn.textContent = '正在重启…';
+        const ar = await api('updater:apply');
+        if (ar && ar.ok === false) { toast('安装失败：' + (ar.error || '未知错误')); btn.disabled = false; btn.textContent = '立即重启并安装'; }
+        // ok：主进程会退出并交给平台脚本替换文件后重启
+      };
+    } catch (e) {
+      toast('下载失败：' + ((e && e.message) || e));
+      btn.textContent = '重试下载';
+    } finally {
+      up.downloading = false;
+    }
+  });
+  onEvent('launcher://up-progress', (p) => {
+    if ($('modal-update').hidden) return;
+    if (p.stage === 'error') { $('um-ptext').textContent = p.message || '下载出错'; return; }
+    $('um-pfill').style.width = (p.percent || 0) + '%';
+    $('um-ptext').textContent = `${p.message || ''}${p.speed ? ' · ' + fmtSpeed(p.speed) : ''}`;
+    const btn = $('um-btn-download');
+    if (btn && up.downloading) btn.textContent = `下载中 ${p.percent || 0}%`;
+  });
 }
 
 /* ================= 版本弹窗 ================= */
@@ -440,11 +650,19 @@ function closeModal(id) { $(id).hidden = true; }
 async function loadVerList() {
   if (!manifestCache) manifestCache = await api('versions:manifest');
   const installedIds = new Set(state.installed.map((v) => v.id));
+  // 已安装 Fabric 版本反查其 MC 版本（fabric-loader-0.16.9-1.20.1 → 1.20.1）
+  const fabInstalledMC = new Set(
+    state.installed.filter((v) => v.fabric).map((v) => (String(v.id).match(/^fabric-loader-.+?-(.+)$/) || [])[1]).filter(Boolean)
+  );
   let list = [];
   if (verTab === 'installed') {
     list = state.installed.map((v) => ({ id: v.id, type: v.fabric ? 'fabric' : 'installed', time: v.time, installed: true }));
   } else if (verTab === 'fabric') {
-    list = manifestCache.versions.filter((v) => v.type === 'release').slice(0, 8).map((v) => ({ ...v, type: 'fabric' }));
+    // 全量正式版列表（可搜索）；已装过 Fabric 的版本直接标「已安装」
+    list = manifestCache.versions
+      .filter((v) => v.type === 'release')
+      .slice(0, 400)
+      .map((v) => ({ ...v, type: 'fabric', installed: fabInstalledMC.has(v.id) }));
   } else if (verTab === 'old') {
     list = manifestCache.versions.filter((v) => v.type.startsWith('old_'));
   } else {
@@ -468,13 +686,18 @@ async function loadVerList() {
     const btn = document.createElement('button');
     btn.className = 'btn';
     if (v.type === 'fabric') {
-      btn.textContent = '安装 Fabric';
-      btn.onclick = async () => {
-        btn.disabled = true; btn.textContent = '安装中…';
-        const r = await api('versions:installFabric', v.id);
-        if (r.ok) { toast(`${v.id} Fabric 安装完成`, true); await refresh(); loadVerList(); }
-        else { toast(r.error); btn.disabled = false; btn.textContent = '安装 Fabric'; }
-      };
+      if (v.installed) {
+        btn.textContent = '已装 Fabric';
+        btn.disabled = true;
+      } else {
+        btn.textContent = '安装 Fabric';
+        btn.onclick = async () => {
+          btn.disabled = true; btn.textContent = '安装中…';
+          const r = await api('versions:installFabric', v.id);
+          if (r.ok) { toast(`${v.id} Fabric 安装完成`, true); await refresh(); loadVerList(); }
+          else { toast(r.error); btn.disabled = false; btn.textContent = '安装 Fabric'; }
+        };
+      }
     } else if (inst) {
       btn.textContent = '选择';
       btn.onclick = async () => { await api('versions:select', v.id); closeModal('modal-version'); await refresh(); };
@@ -529,8 +752,9 @@ function renderAccountList() {
 /* ================= 启动流程 ================= */
 function setLaunchButton(mode) {
   const btn = $('btn-launch'), txt = $('btn-launch-text'), prog = $('launch-progress');
-  if (mode === 'running') { btn.classList.add('running'); txt.textContent = '结束游戏'; prog.hidden = true; }
-  else if (mode === 'installing') { btn.disabled = true; txt.textContent = '下载中…'; prog.hidden = false; }
+  if (mode === 'running') { btn.classList.add('running'); btn.disabled = false; txt.textContent = '结束游戏'; prog.hidden = true; }
+  else if (mode === 'installing') { btn.classList.remove('running'); btn.disabled = true; txt.textContent = '下载中…'; prog.hidden = false; }
+  else if (mode === 'busy') { btn.classList.remove('running'); btn.disabled = true; txt.textContent = '启动中…'; prog.hidden = true; }
   else { btn.classList.remove('running'); btn.disabled = false; txt.textContent = '开始游戏'; prog.hidden = true; }
 }
 function appendLog(line) {
@@ -539,23 +763,38 @@ function appendLog(line) {
   box.scrollTop = box.scrollHeight;
   logLines++;
   $('log-count').textContent = `(${logLines} 行)`;
+  // 首条日志到达 = 游戏进程已真正拉起：按钮切到可中断的「结束游戏」
+  if (!state.running && line) { state.running = true; setLaunchButton('running'); }
 }
 
+/* 防连点：从点击到游戏退出事件之间保持锁定，避免并发 launch / 假死 */
+let launching = false;
 async function onLaunchClick() {
+  if (launching) return;
   if (state.running) { await api('game:stop'); return; }
   if (!state.selectedAccount) { toast('请先登录账户'); openAccountModal(); return; }
   const vid = state.settings.selectedVersionId;
   if (!vid) { toast('请先选择版本'); openVersionModal(); return; }
   const installed = state.installed.some((v) => v.id === vid);
-  if (!installed) {
-    setLaunchButton('installing');
-    $('ip-text').textContent = '准备下载…';
-    const r = await api('versions:install', vid);
-    if (!r.ok) { toast('安装失败：' + r.error); setLaunchButton('idle'); return; }
-    await refresh();
+  launching = true;
+  try {
+    if (!installed) {
+      setLaunchButton('installing');
+      $('ip-text').textContent = '准备下载…';
+      const ir = await api('versions:install', vid);
+      if (!ir.ok) { toast('安装失败：' + ir.error); setLaunchButton('idle'); return; }
+      await refresh();
+    }
+    setLaunchButton('busy');
+    const r = await api('game:launch', vid);
+    if (!r.ok) { toast('启动失败：' + r.error); setLaunchButton('idle'); return; }
+    // 已受理：进程起来由日志事件切「结束游戏」，退出由 game-exit 复位
+  } catch (e) {
+    toast('启动失败：' + ((e && e.message) || e));
+    setLaunchButton('idle');
+  } finally {
+    launching = false;
   }
-  const r = await api('game:launch', vid);
-  if (!r.ok) { toast('启动失败：' + r.error); setLaunchButton('idle'); return; }
 }
 
 /* ================= 进度事件 ================= */
@@ -578,13 +817,18 @@ function onProgress(p) {
 }
 
 /* ================= 页面渲染 ================= */
+let refreshSeq = 0; // 并发守卫：快速切换版本/目录时会并发多次 getState，只认最后一次
 async function refresh() {
+  const seq = ++refreshSeq;
   state = await api('launcher:getState');
+  if (seq !== refreshSeq) return; // 已有更新的刷新被触发，丢弃本次过期结果
   await renderAccountCard();
+  if (seq !== refreshSeq) return;
   renderVersionCard();
   renderSettingsCard();
   setLaunchButton(state.running ? 'running' : 'idle');
   applyAccent((state.settings.global || {}).accent);
+  if (currentPage === 'settings') renderSettingsPage();
 }
 
 /* ================= 事件绑定 ================= */
@@ -599,6 +843,7 @@ function bindUI() {
   document.querySelectorAll('.nav-item').forEach((btn) => {
     btn.onclick = () => {
       const page = btn.dataset.page;
+      currentPage = page;
       if (page !== 'game' && page !== 'download' && page !== 'settings' && page !== 'wiki') $('soon-title').textContent = `${soonTitles[page] || page}在等你的设计图`;
       document.querySelectorAll('.nav-item').forEach((b) => b.classList.toggle('active', b === btn));
       document.querySelectorAll('.page').forEach((p) => p.classList.toggle('active', p.id === 'page-' + page));
@@ -645,15 +890,18 @@ function bindUI() {
   $('btn-offline-login').onclick = async () => {
     const name = $('offline-name').value.trim();
     if (!name) return toast('请输入玩家名');
-    try { await api('account:loginOffline', name); await refresh(); renderAccountList(); toast('离线账户已登录', true); }
-    catch (e) { toast(e.message); }
+    try { await api('account:loginOffline', name); } catch (e) { return toast('登录失败：' + e.message); }
+    try { await refresh(); renderAccountList(); toast('离线账户已登录', true); }
+    catch (e) { toast('登录成功，但界面刷新出错：' + (e && e.message || e)); }
   };
   $('btn-ys-login').onclick = async () => {
     const apiRoot = $('ys-api').value.trim(), username = $('ys-user').value.trim(), password = $('ys-pass').value;
-    try {
-      await api('account:loginYggdrasil', { apiRoot, username, password });
-      await refresh(); renderAccountList(); toast('LittleSkin 登录成功', true);
-    } catch (e) { toast('登录失败：' + e.message); }
+    if (!apiRoot || !username || !password) return toast('请填写完整的皮肤站地址、用户名与密码');
+    // 登录与界面刷新分开捕获：账户入库成功后，刷新异常不应误报「登录失败」
+    try { await api('account:loginYggdrasil', { apiRoot, username, password }); }
+    catch (e) { return toast('登录失败：' + e.message); }
+    try { await refresh(); renderAccountList(); toast('LittleSkin 登录成功', true); }
+    catch (e) { toast('登录成功，但界面刷新出错：' + (e && e.message || e)); }
   };
 
   // 微软正版登录（设备码流）
@@ -690,7 +938,18 @@ function bindUI() {
   onEvent('launcher://progress', onProgress);
   onEvent('launcher://dl-progress', onDlProgress);
   onEvent('launcher://game-log', appendLog);
-  onEvent('launcher://game-exit', (code) => { toast(`游戏已退出（代码 ${code}）`); setLaunchButton('idle'); });
+  onEvent('launcher://game-exit', (p) => {
+    state.running = false;
+    if (p && p.error) toast('游戏异常退出：' + p.error);
+    else if (p && p.code === 0) toast('游戏已退出', true);
+    else if (p && p.code != null) toast(`游戏已退出（代码 ${p.code}）`);
+    else toast('游戏已退出');
+    setLaunchButton('idle');
+  });
+  // 启动时静默检查更新发现有新版 → 提示去设置页查看
+  onEvent('launcher://up-available', (p) => {
+    if (p && p.latest) toast(`发现新版本 v${p.latest}（当前 v${p.current || ''}），可在「设置 → 启动器」中更新`, false);
+  });
 }
 
 /* ================= 下载页 ================= */
@@ -1205,6 +1464,35 @@ async function wikiShowDetail(id) {
     .join('');
   $('wiki-btn-open-text').textContent = `在 Minecraft Wiki 查看 ${id}`;
   $('wiki-btn-open').onclick = () => api('shell:openExternal', info.wikiUrl);
+  wikiLoadNotes(id);
+}
+
+/* 官方更新日志：Mojang 源全文，页内直接渲染（主进程已做 HTML 白名单净化） */
+async function wikiLoadNotes(id) {
+  const box = $('wd-notes');
+  if (!box) return;
+  box.hidden = false;
+  box.innerHTML = '<div class="wd-notes-loading">正在载入官方更新日志…</div>';
+  const ck = 'notes:' + id;
+  let notes = wiki.detailCache[ck];
+  if (!notes) {
+    try {
+      const r = await api('wiki:patchNotes', id);
+      notes = r && r.ok ? r.notes : { found: false };
+    } catch { notes = { found: false }; }
+    wiki.detailCache[ck] = notes;
+  }
+  if (wiki.selectedId !== id || wiki.view !== 'detail') return; // 加载期间已切走
+  if (notes && notes.found) {
+    box.innerHTML =
+      `<div class="wd-notes-head">官方更新日志 · ${esc(notes.entry.title || id)}</div>` +
+      (notes.entry.image ? `<img class="wd-notes-img" src="${esc(notes.entry.image)}" alt="" loading="lazy" onerror="this.remove()" />` : '') +
+      `<div class="wiki-doc">${notes.entry.body || ''}</div>`;
+  } else {
+    // 官方源未收录（过老 / 预览版等）→ 收起正文区，保留外链兜底
+    box.hidden = true;
+    box.innerHTML = '';
+  }
 }
 
 async function wikiOpen() {
@@ -1233,14 +1521,16 @@ bindUI();
 bindSettings();
 bindDownloadUI();
 bindSettingsPage();
+bindUpdateModal();
 initDragDrop();
 bindDropTypeModal();
 bindWikiPage();
 refresh();
-/* 预览模式支持 ?modal=version / ?modal=account / ?modal=vsettings 直接打开弹窗（方便截图看效果）；
- * ?modal=account&mstab=microsoft&mslogin=1 可打开微软标签页并模拟设备码登录流程 */
-if (!window.cube && location.search.includes('modal=version')) setTimeout(openVersionModal, 350);
-if (!window.cube && location.search.includes('modal=account')) setTimeout(() => {
+/* 预览 / 截图用：?modal=version / ?modal=account / ?modal=vsettings / ?modal=update 直接打开弹窗（方便截图看效果）；
+ * ?modal=account&mstab=microsoft&mslogin=1 可打开微软标签页并模拟设备码登录流程。
+ * Electron 调试同样生效（CUBE_PAGE 组合参数直达页面） */
+if (location.search.includes('modal=version')) setTimeout(openVersionModal, 350);
+if (location.search.includes('modal=account')) setTimeout(() => {
   openAccountModal();
   const qs = new URLSearchParams(location.search);
   if (qs.get('mstab') === 'microsoft') {
@@ -1248,7 +1538,8 @@ if (!window.cube && location.search.includes('modal=account')) setTimeout(() => 
     if (qs.get('mslogin')) setTimeout(() => $('btn-ms-login').click(), 300);
   }
 }, 350);
-if (!window.cube && location.search.includes('modal=vsettings')) setTimeout(openVSettingsModal, 350);
+if (location.search.includes('modal=vsettings')) setTimeout(openVSettingsModal, 350);
+if (location.search.includes('modal=update')) setTimeout(() => checkUpdate(true), 500);
 /* URL 参数（Electron 与浏览器预览均生效）：?page=download|settings|wiki 直接打开页面；dlcat=mod 切分类；dlhover=1 列表载入后自动悬停第一项展示灰色详情面板 */
 (function () {
   const qs = new URLSearchParams(location.search);
@@ -1319,3 +1610,16 @@ if (!window.cube && location.search.includes('modal=vsettings')) setTimeout(open
     $('modal-drop-type').hidden = false;
   }
 })();
+
+/* 全局错误兜底：渲染层任何未捕获异常都给出可见提示，
+ * 避免「点了没反应」式的静默失败（如登录链路里的空引用） */
+window.addEventListener('error', (e) => {
+  const msg = (e && e.message) || '未知错误';
+  if (/Cannot set properties of null|Cannot read properties of null/.test(msg)) {
+    toast('界面出现异常：' + msg + '（可继续操作，欢迎反馈）');
+  }
+});
+window.addEventListener('unhandledrejection', (e) => {
+  const msg = (e && e.reason && e.reason.message) || String(e.reason || '未知错误');
+  toast('操作未完成：' + msg);
+});

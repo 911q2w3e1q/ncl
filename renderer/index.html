@@ -320,10 +320,12 @@
             </div>
 
             <div class="set-card">
-              <div class="set-info"><div class="set-name">游戏目录</div><div class="set-desc">版本、库、资源文件的存放位置</div></div>
+              <div class="set-info"><div class="set-name">游戏目录</div><div class="set-desc">版本、库、资源文件的存放位置；更改后旧目录数据可一键迁移过来</div></div>
               <div class="set-ctrl set-ctrl-wide">
                 <span class="set-path" id="sp-gameroot"></span>
                 <button class="btn-ghost btn-sm" id="sp-btn-open-root">打开文件夹</button>
+                <button class="btn-ghost btn-sm" id="sp-btn-change-root">更改…</button>
+                <button class="btn-ghost btn-sm" id="sp-btn-migrate-root" hidden>迁移旧数据</button>
               </div>
             </div>
 
@@ -418,9 +420,10 @@
                 <span class="wd-title" id="wd-title"></span>
               </div>
               <div class="wd-facts" id="wd-facts"></div>
+              <div class="wd-notes" id="wd-notes" hidden></div>
               <div class="wd-note">
-                <p>以上信息来自版本清单与本机已安装数据，均可本地验证。</p>
-                <p>完整的更新内容、生物群系、命令等百科资料请查看 Minecraft Wiki：</p>
+                <p>以上结构化信息来自版本清单与本机已安装数据，均可本地验证；更新日志来自 Mojang 官方源。</p>
+                <p>更全面的生物群系、命令、机制等百科资料请查看 Minecraft Wiki：</p>
                 <button class="wiki-link-btn" id="wiki-btn-open">
                   <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M14 3v2h3.6l-9.3 9.3 1.4 1.4L19 6.4V10h2V3h-7Zm-2 16H5V7h5V5H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5h-2v5Z"/></svg>
                   <span id="wiki-btn-open-text">在 Minecraft Wiki 查看</span>
@@ -558,6 +561,34 @@
   </div>
 
   <div id="toast" hidden></div>
+
+  <!-- 检查更新弹窗 -->
+  <div class="modal-mask" id="modal-update" hidden>
+    <div class="modal modal-sm">
+      <div class="modal-head">
+        <h3>发现新版本</h3>
+        <button class="modal-close" data-close="modal-update">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="um-versions">
+          <span class="um-cur" id="um-cur">v1.1.0</span>
+          <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M4 11v2h12l-5.6 5.6L12 20l8-8-8-8-1.4 1.4L16 11H4Z"/></svg>
+          <span class="um-new" id="um-new">v1.2.0</span>
+        </div>
+        <div class="um-notes" id="um-notes"></div>
+        <div class="um-asset" id="um-asset"></div>
+        <div class="um-progress" id="um-progress" hidden>
+          <div class="um-bar"><div class="um-fill" id="um-pfill"></div></div>
+          <div class="um-text" id="um-ptext"></div>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn-ghost" id="um-open">打开 Release 页</button>
+        <button class="btn-ghost" data-close="modal-update">稍后再说</button>
+        <button class="btn" id="um-btn-download">下载并安装</button>
+      </div>
+    </div>
+  </div>
 
   <!-- 拖拽导入遮罩（拖动文件到窗口时显示，PCL 式拖放加载） -->
   <div class="drop-overlay" id="drop-overlay" hidden>

@@ -3,18 +3,19 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 const INVOKE_CHANNELS = new Set([
-  'launcher:getState',
+  'launcher:getState', 'launcher:setGameRoot', 'launcher:migrateGameRoot',
   'account:loginOffline', 'account:loginYggdrasil', 'account:loginMicrosoft', 'account:select', 'account:remove', 'account:refreshTextures',
   'skin:fetch',
   'versions:manifest', 'versions:install', 'versions:installFabric', 'versions:select', 'versions:delete',
-  'settings:save', 'dialog:pickJava',
+  'settings:save', 'dialog:pickJava', 'dialog:pickGameRoot',
   'game:launch', 'game:stop',
   'download:search', 'download:detail', 'download:install', 'content:importFile', 'content:importPath',
-  'wiki:versionInfo',
-  'shell:openExternal',
+  'wiki:versionInfo', 'wiki:patchNotes',
+  'updater:check', 'updater:download', 'updater:apply',
+  'shell:openPath', 'shell:openExternal',
   'window:minimize', 'window:maximize', 'window:close',
 ]);
-const EVENT_CHANNELS = new Set(['launcher://progress', 'launcher://game-log', 'launcher://game-exit', 'launcher://dl-progress', 'launcher://ms-code']);
+const EVENT_CHANNELS = new Set(['launcher://progress', 'launcher://game-log', 'launcher://game-exit', 'launcher://dl-progress', 'launcher://ms-code', 'launcher://up-progress', 'launcher://up-available']);
 
 contextBridge.exposeInMainWorld('cube', {
   invoke(channel, ...args) {

@@ -12,7 +12,7 @@
 - **版本**
   - 在线版本清单（正式版 / 快照 / 历史版本 / Fabric），一键安装
   - 已安装版本列表，点击切换
-  - Fabric 模组加载器自动安装（与父版本 JSON 合并）
+  - Fabric 模组加载器自动安装（与父版本 JSON 合并）；Fabric 页签列出**全部**正式版（可搜索），已装过 Fabric 的版本直接标「已装 Fabric」
 - **下载后自动补齐（无需手动装任何东西）**
   - 版本 JSON、客户端 jar、依赖库（含旧版 natives 解压）
   - 资源文件（assets objects，旧版自动生成 virtual 虚拟目录）
@@ -25,6 +25,7 @@
   - 完整还原官方启动参数：rules 求值、占位符替换、特性开关（自定义分辨率等）、log4j 配置
   - LittleSkin 自动注入 `minecraft.api.*` 外置登录属性，游戏内外置登录都能用
   - 实时日志、下载进度、运行中可一键结束
+  - 启动链路加固：进程拉起失败（如 Java 异常退出）立即在界面报错，不再「点了没反应」；连点有并发锁；内存上限按系统实际内存自动封顶（至少给系统留 512MB）
 - **下载中心**（顶部导航「下载」）
   - 六个分类：原版游戏 / Mod / 整合包 / 数据包 / 资源包 / 光影包
   - 双来源：Modrinth（免费免 Key）+ 镜像站（BMCLAPI，加速原版下载）
@@ -33,29 +34,36 @@
   - **本地导入**：Modrinth 上没有的内容（如 CurseForge 独占模组 / 整合包），从网页下载后点「导入本地文件」——jar 直接装入对应目录，整合包 zip 自动走解析安装
   - **拖拽导入**（PCL 式）：把 .jar / .zip / .mrpack 直接拖到窗口任意位置——jar 自动装为 Mod；zip 弹类型选择（整合包 / 资源包 / 光影包 / 数据包），整合包同样走完整解析安装
 - **启动器设置**（顶部导航「设置」，结构参考 PCL：左侧分类导航 + 右侧设置卡片，配色用 NCL 强调色系）
-  - 游戏设置：内存上限、Java 路径（自动 / 手动）、窗口分辨率 / 全屏、JVM 参数、版本隔离、**自动进入服务器**（1.20+ quickPlay）、**下载加速**（原版安装走 BMCLAPI 镜像）
-  - 启动器：主题强调色（粉 / 红 / 黄 / 蓝 / 紫，影响设置页等面板界面）、游戏目录、检查更新
+  - 游戏设置：内存上限（按系统内存封顶）、Java 路径（自动 / 手动）、窗口分辨率 / 全屏、JVM 参数、版本隔离、**自动进入服务器**（1.20+ quickPlay）、**下载加速**（原版安装走 BMCLAPI 镜像）
+  - 启动器：主题强调色（粉 / 红 / 黄 / 蓝 / 紫，影响设置页等面板界面）、游戏目录（**打开文件夹 / 更改 / 迁移旧数据**）、**检查更新**（查询 GitHub Releases，一键下载并自动重启安装）
   - 账户：账户管理入口与当前账户一览；关于：版本信息与设置存储说明
+- **游戏数据位置（便携）**
+  - 打包版默认把 `.minecraft`（版本 / 库 / 资源）放在**启动器旁边**，不再默认占用 C 盘
+  - 启动器自身数据（settings.json / accounts.json / 更新包）固定在用户目录，改游戏目录不丢设置
+  - 从旧数据目录切换过来后，设置页会出现「迁移旧数据」按钮，一键把旧目录内容搬到新位置
 - **Wiki 整合**（顶部导航「Wiki 整合」，按手绘草图实现）
   - 左侧紫色搜索框：输入版本号实时过滤（防抖），命中全量版本清单（正式版 / 快照 / 历史版本均可搜）
   - 左侧粉色版本列表：类型圆点（绿=正式版 / 黄=快照）+ 已装 / Fabric 徽章；选中项始终置顶可见
   - 右侧红色选项卡：全部 / 正式版 / 快照 / 历史版本 / 已安装
   - 右侧灰色内容区两级视图：点列表项显示**简略资料**（大版本号、类型徽章、发布日期、安装状态、Fabric），点红色「查看详细资料」按钮进入**详细视图**（Java 主版本、资源索引、主类、客户端大小与 SHA1、继承版本等 9 项结构化事实）
   - 详细视图左上角「← 返回」键回到简略视图
-  - 数据完全来自版本清单 + 本机安装状态（可本地验证）；百科正文（更新内容 / 生物群系 / 命令等）因 minecraft.wiki 有反爬，通过底部按钮一键跳转系统浏览器
+  - **官方更新日志页内直读**：详细视图下方直接渲染 Mojang 官方更新日志全文（HTML 白名单净化，链接新窗口打开），不再跳网页；官方源未收录的版本保留「在 Minecraft Wiki 查看」外链兜底
+  - 结构化数据完全来自版本清单 + 本机安装状态（可本地验证）
 
-## 下载（三平台兼容版 1.1.0）
+## 下载（三平台兼容版 1.2.0）
 
 [GitHub Releases](https://github.com/911q2w3e1q/ncl/releases) 提供开箱即用的打包版本，无需 Node 环境：
 
 | 平台 | 包 | 用法 |
 | --- | --- | --- |
-| Windows 10/11 | `NCL-1.1.0-win64.zip` | 解压后双击 `NCL.exe`（与 `engine` 文件夹保持在一起） |
-| Linux x64 | `NCL-1.1.0-linux-x64.tar.gz` | 解压后执行 `./NCL.sh` |
-| macOS Apple Silicon | `NCL-1.1.0-macos-arm64.zip` | 解压后右键 → 打开 `NCL.app`（未签名，首次需右键绕过 Gatekeeper） |
-| macOS Intel | `NCL-1.1.0-macos-x64.zip` | 同上 |
+| Windows 10/11 | `NCL-1.2.0-win64.zip` | 解压后双击 `NCL.exe`（与 `engine` 文件夹保持在一起） |
+| Linux x64 | `NCL-1.2.0-linux-x64.tar.gz` | 解压后执行 `./NCL.sh` |
+| macOS Apple Silicon | `NCL-1.2.0-macos-arm64.zip` | 解压后右键 → 打开 `NCL.app`（未签名，首次需右键绕过 Gatekeeper） |
+| macOS Intel | `NCL-1.2.0-macos-x64.zip` | 同上 |
 
-三平台共用同一套源码，游戏数据各存各的标准位置，互不干扰。1.0.0（仅 Windows）Release 仍保留，不影响老用户。
+三平台共用同一套源码，游戏数据各存各的标准位置，互不干扰。1.0.0（仅 Windows）与 1.1.0 Release 仍保留，不影响老用户。
+
+**更新方式**：设置 → 启动器 → 检查更新 → 下载并安装，启动器会自动重启完成替换（也可直接下载新版包手动覆盖）。
 
 ## 运行（源码方式）
 
@@ -72,10 +80,18 @@ node test/download-test.js  # 下载中心连通性（Modrinth 搜索/详情/分
 node test/coverage-test.js  # Modrinth 覆盖率回归（33 个主流模组含弯引号变体，验证删 CF 后内容库够用）
 node test/import-test.js   # 本地整合包导入端到端（最小 .mrpack → 装 1.20.1+Fabric → 解压 overrides）
 node test/wiki-test.js     # Wiki 版本信息（已安装/未安装/不存在 + Java 主版本/SHA1/jar 大小）
+node test/updater-wiki-test.js  # 检查更新 semver / 平台资产匹配 / Wiki 正文 HTML 净化 / 内存钳制 / 官方补丁（27 项）
 node test/crossplatform-test.js  # 三平台启动参数（macOS -XstartOnFirstThread / classpath 分隔符 / Java 运行时平台键）
 npm run test:install  # 真实安装 1.20.1（客户端+库+资源+Java）
 npm run test:java     # 自动下载 Mojang 官方 Java 25 运行时并验证
 npm run test:launch   # 离线账户真实启动游戏（需 xvfb 环境）
+```
+
+LittleSkin 登录空引用崩溃的复现 / 回归脚本（mock Yggdrasil 服务器 + puppeteer）：
+
+```bash
+node renderer/test-ys-repro.js      # 真实走一遍 LittleSkin 登录，验证不再出现 textContent 空引用
+node renderer/test-mock-smoke.js    # mock 模式界面冒烟（更新弹窗 / Fabric 全量列表 / 迁移按钮 / Wiki 正文）
 ```
 
 浏览器预览界面（假数据，无需 Electron）：直接用 chromium 打开 `renderer/index.html`，
@@ -162,5 +178,11 @@ NCL/
 | BMCLAPI 镜像路径（清单 / 版本 JSON / 客户端 / maven / 资源索引 / 资源对象） | 通过，实测 200 |
 | Linux 便携包真机启动（xvfb，界面 + Wiki 页渲染） | 通过，截图见 `docs/` |
 | 三平台打包（Windows ico / macOS icns 符号链接 / Linux `--no-sandbox`） | 通过，产物见 Release |
+| **LittleSkin 登录空引用崩溃**（mock Yggdrasil + puppeteer 复现） | 通过：根因为账户卡 innerHTML 重建丢失 `acc-api` 元素，修复后登录 / 连刷 5 次 refresh 均正常 |
+| **下载期间 UI 卡死**（同步解压阻塞主进程） | 通过：解压移入子进程、整合包先落盘再异步解析 |
+| **检查更新**（semver / 平台资产匹配 / 更新脚本） | 通过（`test/updater-wiki-test.js`，27 项断言） |
+| **Wiki 官方更新日志页内渲染**（Mojang 源 + HTML 白名单净化） | 通过，截图见 `docs/` |
+| **内存上限按系统封顶**（16G 硬顶 + 系统留 512MB） | 通过（滑块上限随 `sysMemoryMB` 动态变化） |
+| **v1.2.0 Linux 打包版真机启动**（xvfb，关于页版本徽章 v1.2.0） | 通过，截图见 `docs/` |
 
 > 无头环境下日志中的 authlib 401（离线模式查 Mojang 档案）、flite/ALSA 报错属预期噪音，不影响启动。
