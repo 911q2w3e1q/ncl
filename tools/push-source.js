@@ -77,7 +77,7 @@ async function api(method, urlPath, body) {
       continue;
     }
     const content = fs.readFileSync(abs).toString('base64');
-    const mode = /\.(sh|png)$/.test(f.path) || f.path === 'tools/launcher.c' ? '100755' : '100644';
+    const mode = /\.sh$/.test(f.path) ? '100755' : '100644';
     tree.push({ path: f.path, mode, type: 'blob', _content: content });
   }
 
