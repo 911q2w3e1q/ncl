@@ -16,7 +16,7 @@ const { Readable } = require('stream');
 const AdmZip = require('adm-zip');
 
 const LAUNCHER_NAME = 'NCL';
-const LAUNCHER_VERSION = '1.0.0';
+const LAUNCHER_VERSION = '1.1.0';
 const MANIFEST_URL = 'https://piston-meta.mojang.com/mc/game/version_manifest_v2.json';
 const JAVA_MANIFEST_URL = 'https://launchermeta.mojang.com/v1/products/java-runtime/2ec0cc96c44e5a76b9c8b7c39df7210883d12871/all.json';
 
@@ -947,6 +947,8 @@ function buildLaunchCommand(versionId, account, settings) {
     jvmArgs.push(`-Djava.library.path=${nativesDir}`, '-cp', classpath);
   }
   jvmArgs.push(`-Xmx${vs.memory || 2048}M`);
+  // macOS：LWJGL/GLFW 要求 JVM 启动在主线程，否则窗口起不来（官方启动器同样处理）
+  if (osName() === 'osx') jvmArgs.push('-XstartOnFirstThread');
   if (exists(log4jFile)) jvmArgs.push(`-Dlog4j.configurationFile=${log4jFile}`);
   // LittleSkin/外置登录：让游戏用皮肤站的 sessionserver（authlib 约定属性）
   if (account.type === ACCOUNT_TYPES.YGGDRASIL) {
