@@ -105,13 +105,13 @@ async function api(method, urlPath, body) {
   await api('PATCH', `/repos/${REPO}/git/refs/heads/main`, { sha: commit.sha, force: false });
   console.log('✅ main 已更新:', commit.sha);
 
-  // 8. 打 v1.2.0 tag（release 创建时已自动生成 tag 对象，这里确保 ref 存在）
+  // 8. 把 v1.2.0 tag 移到新 commit（release 创建时 GitHub 自动把 tag 指到了默认分支 HEAD，需修正）
   try {
-    await api('POST', `/repos/${REPO}/git/refs`, { ref: 'refs/tags/v1.2.0', sha: commit.sha });
-    console.log('✅ tag v1.2.0 已指向新 commit');
+    await api('PATCH', `/repos/${REPO}/git/refs/tags/v1.2.0`, { sha: commit.sha, force: true });
+    console.log('✅ tag v1.2.0 已移到新 commit');
   } catch (e) {
     if (/already exists/i.test(e.message)) console.log('tag v1.2.0 已存在（指向 release 初始 commit，正常）');
-    else console.log('tag 创建跳过:', e.message.slice(0, 120));
+    else console.log('tag 更新跳过:', e.message.slice(0, 120));
   }
   console.log('\n全部完成');
 })().catch((e) => { console.error('推送失败:', e.message); process.exit(1); });
