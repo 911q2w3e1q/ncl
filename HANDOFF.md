@@ -1,6 +1,6 @@
-# NCL 开发交接文档（v1.3.0 已发布）
+# NCL 开发交接文档（v1.4.0 已发布）
 
-> 最后更新：2026-10-25 21:20（v1.3.0 Release 发布完成：四大模组加载器 + 主题定制）
+> 最后更新：2026-10-25 22:20（v1.4.0 Release 发布完成：AI 报错分析）
 > 用途：会话上下文若被清理，新会话凭本文档 + 任务清单无缝接手。
 
 ## 一、项目位置与运行方式
@@ -12,9 +12,53 @@
   - v1.0.0（仅 Windows）：https://github.com/911q2w3e1q/ncl/releases/tag/v1.0.0
   - v1.1.0（三平台）：https://github.com/911q2w3e1q/ncl/releases/tag/v1.1.0
   - v1.2.0（三平台）：https://github.com/911q2w3e1q/ncl/releases/tag/v1.2.0
-  - **v1.3.0（当前版）**：https://github.com/911q2w3e1q/ncl/releases/tag/v1.3.0
+  - v1.3.0（四大加载器 + 主题）：https://github.com/911q2w3e1q/ncl/releases/tag/v1.3.0
+  - **v1.4.0（当前版）**：https://github.com/911q2w3e1q/ncl/releases/tag/v1.4.0
 
-## 二、v1.3.0 新增（TaskList #26–#30 全部完成）
+## 二、v1.4.0 新增（TaskList #33–#37 全部完成）
+
+| # | 任务 | 主进程 | 渲染层 | 验证 |
+|---|---|---|---|---|
+| 33 | AI 分析模块 | ✅ ai-analyzer.js：现场采集 + OpenAI 兼容调用 + 结构化解析 | — | ai-analyzer-test ✅（32 断言） |
+| 34 | 修复动作执行 | ✅ ai-fixer.js：受控执行 + 备份 + 回滚 | — | 同上（含路径逃逸/越界用例） |
+| 35 | 崩溃检测 + IPC | ✅ 异常退出自动触发 + 6 个 ai:* 通道 | ✅ 日志区「分析报错」 | mock 冒烟 ✅ |
+| 36 | 分析面板 UI | — | ✅ ai-panel.js + 弹窗 + 设置页配置区 | mock 冒烟 29 项 ✅ + 截图 ✅ |
+| 37 | 测试与发布 | — | — | 全量 10 套件全绿 + 四资产上传核验 ✅ |
+
+### AI 报错分析实现要点（v1.4.0）
+
+**`main/ai-analyzer.js`（独立模块）**
+- `normalizeAiConfig(raw)`：字段清洗。baseUrl 去尾斜杠、apiKey/model trim、temperature 钳制 [0,2]、maxTokens 钳制 [256,8000]；**enabled 显式传入时以其为准，未传时按「有 Key 即可用」推断**（这是踩过的坑：一开始无脑 `enabled && apiKey` 导致只填 Key 也不生效）
+- `collectCrashContext(ctx)`：采集 crash-reports 目录最新 2 份报告（每份 ≤60KB）+ 日志尾部 220 行 + 关键错误行抽取（正则匹配 Exception/Error/Caused by/OOM/UnsupportedClassVersion 等）+ 版本与运行环境信息
+- `buildPrompt(ctx)`：system prompt 硬性规定 JSON 输出结构，并列出**动作类型白名单**（setMemory / setJvmArgs / removeJvmArg / setJavaPath / setWidth / setHeight / setFullscreen / setIsolation / setServerAddress / writeFile）及各自 target/value 约定
+- `extractJSON(text)`：容错解析——剥 ``` 包裹、取首个 { 到末个 }，失败返回 null
+- `analyzeCrash(cfg, ctx)`：模型没给 JSON 时降级为纯文本结论（`degraded: true`），不阻塞用户
+- `testConnection(cfg)`：连通性测试
+
+**`main/ai-fixer.js`（独立模块）**
+- `applyToSettings(settings, action)`：把单个动作落到 settings 对象（不落盘），数值越界直接抛错
+- `resolveSafePath(gameDir, rel)`：**拒绝绝对路径与 Windows 盘符，拒绝 `..` 逃逸**（解析后必须在 gameDir 内）
+- `applyActions(opts)`：先备份 settings 到 `ai-backups/`，再逐个执行；单个动作失败不阻断其余；全部成功才落盘
+- `rollback(backupPath, save)`：从备份恢复
+
+**主进程接入**
+- `rememberGameContext(versionId, gameDir)` + `lastGameLog`（保留最近 200KB 日志）
+- `launchGame` 的 `proc.on('exit')` 里判定崩溃：`code !== 0 || signal` → 若已启用且 autoAnalyze 则异步 `runCrashAnalysis('auto')`；否则发 `launcher://game-crashed` 事件让渲染层提示手动分析
+- IPC：`ai:getConfig` / `ai:setConfig` / `ai:test` / `ai:analyze` / `ai:applyActions` / `ai:rollback`
+- API Key 回传时掩码（`sk-a****b123`），设置页留空即表示不修改
+
+**渲染层（`renderer/ai-panel.js`）**
+- 分析弹窗：核心原因卡（置信度标签）/ 可能的原因 / 解决办法（风险等级）
+- 「帮我解决」→ `ai:applyActions` → toast 展示变更 → **自动 `game:launch` 重启验证** → 关闭弹窗
+- 设置页配置区：启用开关、崩溃时自动分析、API 地址、Key（password）、模型、测试连接
+
+### v1.4.0 踩坑
+
+- **`ai-panel.js` 必须在 `renderer.js` 之前引入**：renderer.js 末尾调用 `bindAiPanel()`，若 ai-panel.js 后加载则函数未定义，弹窗永远不打开（mock 冒烟直接报 FAIL 才暴露）
+- **mock 的 `ai:analyze` 必须同步返回 analysis**：AI 面板走 `api('ai:analyze')` 的返回值渲染，不是等事件；事件只用于主进程自动分析场景
+- **`normalizeAiConfig` 的 enabled 语义**：见上
+
+## 三、v1.3.0 新增（TaskList #26–#30 全部完成）
 
 | # | 任务 | 主进程 | 渲染层 | 验证 |
 |---|---|---|---|---|
@@ -45,7 +89,7 @@
 **顺手修的隐患**
 - `paths()` 在 `initPaths()` 里 `GAME_ROOT` 赋值前被 `loadSettings()` 调用 → `path.join(null)` 抛未捕获 Promise 拒绝（打包版启动可见，v1.2.0 遗留）。已改为 `const root = GAME_ROOT || LAUNCHER_DIR || process.cwd()`
 
-## 三、任务清单状态（TaskList #17–#25 全部完成）
+## 四、任务清单状态（TaskList #17–#25 全部完成）
 
 | # | 任务 | 主进程 | 渲染层 | 验证 |
 |---|---|---|---|---|
@@ -61,7 +105,7 @@
 | 24 | Electron 真机冒烟 | — | ✅ 7 张截图全过（xvfb + CUBE_SCREENSHOT/CUBE_PAGE/CUBE_MODAL） | v1.2.0 徽章确认 |
 | 25 | 构建三平台包并发布 v1.2.0 | — | — | ✅ 四资产上传字节级核验通过 |
 
-## 四、渲染层改动明细（renderer/）
+## 五、渲染层改动明细（renderer/）
 
 ### renderer/renderer.js
 - mockState 增加 `sysMemoryMB: 16384`、`launcherVersion: '1.2.0'`、`gameRoot/gameRootPrev`
@@ -91,7 +135,7 @@
 - mock Yggdrasil 服务器（CORS + OPTIONS）+ 静态 serve renderer/ + 注入忠实 `window.cube` stub
 - 流程：诊断 → 点登录 → 抓 `window.refresh()` 的 stack → 验证 acc-api 行与 5 连刷稳定性
 
-## 五、主进程改动（main/main.js，均已完成）
+## 六、主进程改动（main/main.js，均已完成）
 
 - 版本 `LAUNCHER_VERSION = '1.2.0'`
 - GAME_ROOT / LAUNCHER_DIR 分离 + 便携目录 + 旧数据迁移（`initPaths`）
@@ -105,7 +149,7 @@
 - exports 增加：`safeMemoryMB, semverCmp, sanitizeWikiHtml, platformAssetRe, wikiPatchNotes, updaterCheck, setGameRoot, setLauncherDir, paths`
 - createWindow 增加 `CUBE_MODAL` 环境变量透传（冒烟截图直达弹窗）
 
-## 六、测试状态（全绿）
+## 七、测试状态（全绿）
 
 | 测试文件 | 结果 |
 |---|---|
@@ -118,9 +162,9 @@
 | renderer/test-mock-smoke.js | ✅（更新弹窗/Fabric tab/迁移按钮/wiki-doc） |
 | renderer/test-ys-repro.js | ✅（LittleSkin 复现 + 修复回归） |
 
-跑全部：`for t in core crossplatform updater-wiki download import install java launch wiki coverage loaders-theme; do node test/$t-test.js; done` + `node renderer/test-mock-smoke.js`
+跑全部：`for t in core crossplatform updater-wiki download import install java launch wiki coverage loaders-theme ai-analyzer; do node test/$t-test.js; done` + `node renderer/test-mock-smoke.js`
 
-## 七、v1.2.0 发布结果（2026-10-25 完成）
+## 八、v1.2.0 发布结果（2026-10-25 完成）
 
 - Release：https://github.com/911q2w3e1q/ncl/releases/tag/v1.2.0（id 423359571）
 - 资产（均经字节级核验 remote == local，state=uploaded）：
@@ -135,7 +179,7 @@
 - 源码：v1.2.0 提交已推送到 origin/main，tag v1.2.0 已从误指的 v1.1.0 提交（bf4c9d0）移到 v1.2.0 提交；v1.0.0/v1.1.0 Release 与 tag 未动
 - 发布说明：`RELEASE_NOTES_v1.2.0.md`
 
-## 八、v1.3.0 发布结果（2026-10-25 完成）
+## 九、v1.3.0 发布结果（2026-10-25 完成）
 
 - Release：https://github.com/911q2w3e1q/ncl/releases/tag/v1.3.0（id 423417741）
 - 源码：main 已更新到 commit 4d9d3d69，tag v1.3.0 已指向同一 commit；v1.0.0/v1.1.0/v1.2.0 Release 与 tag 未动
@@ -166,7 +210,23 @@
 - install-test.js 异常尾行排查
 - 若用户反馈新问题，按本任务清单模式续 TaskList
 
-## 九、踩坑记录（重要）
+## 九点五、v1.4.0 发布结果（2026-10-25 完成）
+
+- Release：https://github.com/911q2w3e1q/ncl/releases/tag/v1.4.0（id 423449479）
+- 源码：main 已更新到 commit 1a20e48c，tag v1.4.0 指向同一 commit；v1.0.0–v1.3.0 的 Release 与 tag 未动
+- 发布说明：`RELEASE_NOTES_v1.4.0.md`
+- 资产（构建脚本 `/tmp/build-140.sh`）：
+
+| 资产 | 字节数 |
+|---|---|
+| NCL-1.4.0-win64.zip | 134,256,717 |
+| NCL-1.4.0-linux-x64.tar.gz | 114,481,482 |
+| NCL-1.4.0-macos-arm64.zip | 108,594,871 |
+| NCL-1.4.0-macos-x64.zip | 113,432,376 |
+
+- 新增测试：`test/ai-analyzer-test.js`（32 断言）；`renderer/test-mock-smoke.js` 扩到 29 项
+
+## 十、踩坑记录（重要）
 
 - `gh release create` 多附件任一失败整体回滚；`gh release upload` 会挂死 → 用 curl 直传 `https://uploads.github.com/.../assets?name=`
 - **上传成功判断不能截断响应体**：asset JSON 的 `"state":"uploaded"` 字段在 300 字符之后，`head -c 300` 会漏掉导致误判失败、重复上传撞 422 already_exists；正确做法：HTTP 201 即成功，422 already_exists 时校验远端 size
