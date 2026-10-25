@@ -100,6 +100,37 @@ function check(name, cond) { console.log(`${cond ? 'PASS' : 'FAIL'}  ${name}`); 
   check('顶部导航栏使用主题色渐变', /linear-gradient/.test(accentAfter.topbarBg) && accentAfter.topbarBg.includes('rgb(6, 182, 212)'));
   await page.screenshot({ path: '/tmp/smoke/m3c-accent-cyan.png' });
 
+  // 3d) AI 报错分析面板：点「分析报错」→ 弹窗出现 → 原因/方案渲染 → 点「帮我解决」
+  await page.goto('http://127.0.0.1:38180/index.html', { waitUntil: 'networkidle0' });
+  await sleep(900);
+  await page.$eval('#log-details', (el) => { el.open = true; });
+  await sleep(200);
+  check('日志区有「分析报错」按钮', await page.$eval('#btn-ai-analyze', (el) => !!el));
+  await page.$eval('#btn-ai-analyze', (el) => el.click());
+  await sleep(1500);
+  const aiPanel = await page.evaluate(() => ({
+    visible: !document.getElementById('modal-ai').hidden,
+    summary: document.getElementById('ai-summary').textContent,
+    causes: document.querySelectorAll('#ai-causes .ai-cause').length,
+    solutions: document.querySelectorAll('#ai-solutions .ai-solution').length,
+    fixBtns: document.querySelectorAll('#ai-solutions .ai-fix-btn').length,
+    confidence: document.getElementById('ai-confidence').textContent,
+  }));
+  check('AI 分析弹窗可见', aiPanel.visible);
+  check('AI 给出核心原因摘要', aiPanel.summary.length > 5);
+  check('AI 原因列表已渲染', aiPanel.causes >= 1);
+  check('AI 解决方案已渲染', aiPanel.solutions >= 1);
+  check('每条方案带「帮我解决」按钮', aiPanel.fixBtns >= 1);
+  await page.screenshot({ path: '/tmp/smoke/m3d-ai-panel.png' });
+
+  // 点「帮我解决」→ 应调用 ai:applyActions 并提示
+  await page.$eval('#ai-solutions .ai-fix-btn', (el) => el.click());
+  await sleep(1200);
+  const aiApplied = await page.evaluate(() => ({
+    toast: document.body.innerText.includes('已应用') || document.body.innerText.includes('重启'),
+  }));
+  check('「帮我解决」触发自动处理', aiApplied.toast);
+
   // 4) Wiki 详细视图（mock 补丁数据）
   await page.goto('http://127.0.0.1:38180/index.html?page=wiki&wikiv=1.20.1&wikidetail=1', { waitUntil: 'networkidle0' });
   await sleep(1200);

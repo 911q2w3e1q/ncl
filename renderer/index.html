@@ -77,6 +77,10 @@
           <div class="card card-log">
             <details id="log-details">
               <summary>运行日志 <span class="log-count" id="log-count"></span></summary>
+              <div class="log-actions">
+                <button class="btn-ghost btn-sm" id="btn-ai-analyze">🩺 分析报错</button>
+                <span class="log-actions-hint" id="ai-analyze-hint">游戏崩溃或日志出现错误时可让 AI 分析原因并一键修复</span>
+              </div>
               <pre id="log-box" class="log-box"></pre>
             </details>
           </div>
@@ -351,6 +355,52 @@
               </div>
             </div>
 
+            <div class="set-group-title">AI 报错分析</div>
+
+            <div class="set-card">
+              <div class="set-info"><div class="set-name">启用 AI 分析</div><div class="set-desc">游戏崩溃时自动调用 AI 分析原因并给出可一键应用的修复方案</div></div>
+              <div class="set-ctrl">
+                <label class="set-toggle"><input type="checkbox" id="sp-ai-enabled" /><span class="set-toggle-slider"></span></label>
+              </div>
+            </div>
+
+            <div class="set-card">
+              <div class="set-info"><div class="set-name">崩溃时自动分析</div><div class="set-desc">游戏异常退出后自动弹出分析结果；关闭后需在运行日志里手动点「分析报错」</div></div>
+              <div class="set-ctrl">
+                <label class="set-toggle"><input type="checkbox" id="sp-ai-auto" checked /><span class="set-toggle-slider"></span></label>
+              </div>
+            </div>
+
+            <div class="set-card">
+              <div class="set-info"><div class="set-name">API 地址</div><div class="set-desc">兼容任何 OpenAI 格式接口，如 https://api.openai.com/v1、https://api.deepseek.com/v1、https://open.bigmodel.cn/api/paas/v4</div></div>
+              <div class="set-ctrl set-ctrl-wide">
+                <input type="text" id="sp-ai-baseurl" placeholder="https://api.openai.com/v1" />
+              </div>
+            </div>
+
+            <div class="set-card">
+              <div class="set-info"><div class="set-name">API Key</div><div class="set-desc">只保存在本机设置文件，不会上传到任何第三方</div></div>
+              <div class="set-ctrl set-ctrl-wide">
+                <input type="password" id="sp-ai-apikey" placeholder="sk-…" />
+              </div>
+            </div>
+
+            <div class="set-card">
+              <div class="set-info"><div class="set-name">模型</div><div class="set-desc">模型名称，如 gpt-4o-mini、deepseek-chat、glm-4-flash</div></div>
+              <div class="set-ctrl set-ctrl-wide">
+                <input type="text" id="sp-ai-model" placeholder="gpt-4o-mini" />
+              </div>
+            </div>
+
+            <div class="set-card">
+              <div class="set-info"><div class="set-name">测试连接</div><div class="set-desc">确认接口地址、Key 与模型可用</div></div>
+              <div class="set-ctrl">
+                <span class="set-path" id="sp-ai-test-result"></span>
+                <button class="btn-ghost btn-sm" id="sp-btn-ai-save">保存</button>
+                <button class="btn-ghost btn-sm" id="sp-btn-ai-test">测试连接</button>
+              </div>
+            </div>
+
             <div class="set-card set-card-info">
               <div class="set-info"><div class="set-name">内容来源</div><div class="set-desc">下载页内容来自 Modrinth（免 API Key）与 BMCLAPI 镜像站（加速原版下载）。CurseForge 独占内容可用下载页工具栏的「导入本地文件」装入。</div></div>
             </div>
@@ -608,6 +658,47 @@
     </div>
   </div>
 
+  <!-- AI 报错分析弹窗 -->
+  <div class="modal-mask" id="modal-ai" hidden>
+    <div class="modal modal-ai">
+      <div class="modal-head">
+        <h3>🩺 AI 报错分析</h3>
+        <button class="modal-close" data-close="modal-ai">✕</button>
+      </div>
+      <div class="modal-body ai-body">
+        <div class="ai-status" id="ai-status">
+          <div class="ai-spinner"></div>
+          <div class="ai-status-text" id="ai-status-text">正在分析崩溃原因…</div>
+        </div>
+        <div class="ai-error" id="ai-error" hidden></div>
+        <div class="ai-result" id="ai-result" hidden>
+          <div class="ai-summary-card">
+            <div class="ai-summary-head">
+              <span class="ai-summary-label">核心原因</span>
+              <span class="ai-confidence" id="ai-confidence">—</span>
+            </div>
+            <div class="ai-summary" id="ai-summary"></div>
+          </div>
+
+          <div class="ai-section" id="ai-causes-wrap" hidden>
+            <div class="ai-section-title">可能的原因</div>
+            <div class="ai-causes" id="ai-causes"></div>
+          </div>
+
+          <div class="ai-section" id="ai-solutions-wrap" hidden>
+            <div class="ai-section-title">解决办法 <span class="ai-section-sub">点「帮我解决」自动应用并重启游戏验证</span></div>
+            <div class="ai-solutions" id="ai-solutions"></div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <span class="mf-hint" id="ai-foot-hint">AI 建议仅供参考，重要配置会先自动备份</span>
+        <button class="btn-ghost" id="ai-btn-retry" hidden>重新分析</button>
+        <button class="btn-ghost" data-close="modal-ai">关闭</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 拖拽导入遮罩（拖动文件到窗口时显示，PCL 式拖放加载） -->
   <div class="drop-overlay" id="drop-overlay" hidden>
     <div class="drop-box">
@@ -648,6 +739,7 @@
     </div>
   </div>
 
+  <script src="ai-panel.js"></script>
   <script src="renderer.js"></script>
 </body>
 </html>

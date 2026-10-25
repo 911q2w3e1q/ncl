@@ -13,13 +13,13 @@ const DEFAULT_SKINS = {
 /* ================= mock 预览模式 ================= */
 const mockState = {
   gameRoot: '/预览模式',
-  launcherVersion: '1.3.0',
+  launcherVersion: '1.4.0',
   sysMemoryMB: 16384,
   accounts: [{ id: 'mock-1', type: 'offline', name: 'Steve', uuid: '8f14e45f-ceea-467a-9f0c-8b8b0b0a1b2c', skinUrl: null, capeUrl: null, model: null }],
   selectedAccount: { id: 'mock-1', type: 'offline', name: 'Steve', uuid: '8f14e45f-ceea-467a-9f0c-8b8b0b0a1b2c', skinUrl: null, capeUrl: null, model: null },
   settings: {
     selectedVersionId: '1.20.1',
-    global: { memory: 4096, javaPath: '', width: 854, height: 480, fullscreen: false, jvmArgs: '', isolation: false, serverAddress: '', mirror: false, accent: 'pink', background: '', backgroundName: '', gameRoot: '/预览模式/.minecraft', gameRootPrev: '/预览模式/旧目录' },
+    global: { memory: 4096, javaPath: '', width: 854, height: 480, fullscreen: false, jvmArgs: '', isolation: false, serverAddress: '', mirror: false, accent: 'pink', background: '', backgroundName: '', gameRoot: '/预览模式/.minecraft', gameRootPrev: '/预览模式/旧目录', ai: { enabled: true, baseUrl: 'https://api.openai.com/v1', apiKey: 'sk-mock-key', model: 'gpt-4o-mini', autoAnalyze: true } },
     perVersion: {},
   },
   installed: [
@@ -165,6 +165,52 @@ const mockApi = (channel, ...args) => new Promise((resolve) => {
         setTimeout(() => (mockListeners['launcher://game-exit'] || []).forEach((cb) => cb({ code: 0, signal: null })), 120);
         resolve({ ok: true }); break;
       }
+      case 'ai:getConfig': resolve({
+        ok: true,
+        enabled: !!mockState.settings.global.ai.enabled,
+        baseUrl: (mockState.settings.global.ai && mockState.settings.global.ai.baseUrl) || 'https://api.openai.com/v1',
+        model: (mockState.settings.global.ai && mockState.settings.global.ai.model) || 'gpt-4o-mini',
+        apiKeyMasked: (mockState.settings.global.ai && mockState.settings.global.ai.apiKey) ? 'sk-a****b123' : '',
+        hasKey: !!(mockState.settings.global.ai && mockState.settings.global.ai.apiKey),
+        autoAnalyze: mockState.settings.global.ai ? mockState.settings.global.ai.autoAnalyze !== false : true,
+      }); break;
+      case 'ai:setConfig': {
+        const patch = args[0] || {};
+        if (!mockState.settings.global.ai) mockState.settings.global.ai = {};
+        Object.assign(mockState.settings.global.ai, patch);
+        resolve({ ok: true, config: mockState.settings.global.ai }); break;
+      }
+      case 'ai:test': resolve({ ok: true, message: '连接成功：OK（预览模式）' }); break;
+      case 'ai:analyze': {
+        const payload = {
+            trigger: 'manual', ok: true,
+            analysis: {
+              summary: '示例：Java 内存不足导致 OutOfMemoryError，建议把内存上限调到 4GB。',
+              confidence: 'high',
+              causes: [
+                { title: '内存不足', detail: '日志中出现 java.lang.OutOfMemoryError: Java heap space，当前分配的 2GB 无法满足模组需求。' },
+                { title: '模组负载偏高', detail: '同时加载了 30+ 模组，实体与区块占用较大。' },
+              ],
+              solutions: [
+                { title: '把内存上限提高到 4GB', detail: '在版本设置里把内存上限从 2GB 调为 4096MB。', risk: 'low', actions: [{ type: 'setMemory', target: '*', value: '4096', description: '内存上限改为 4096 MB' }] },
+                { title: '追加 G1GC 参数', detail: '为大堆启用 G1GC，降低停顿并改善内存回收。', risk: 'low', actions: [{ type: 'setJvmArgs', target: '*', value: '-XX:+UseG1GC', description: '追加 JVM 参数 -XX:+UseG1GC' }] },
+                { title: '关闭版本隔离', detail: '让该版本与其他版本共用游戏目录。', risk: 'medium', actions: [{ type: 'setIsolation', target: '*', value: 'false', description: '关闭版本隔离' }] },
+              ],
+              actions: [],
+            },
+            versionId: mockState.settings.selectedVersionId || '1.20.1',
+        };
+        setTimeout(() => {
+          (mockListeners['launcher://ai-analysis'] || []).forEach((cb) => cb(payload));
+        }, 400);
+        resolve({ ok: true, analysis: payload.analysis, error: null }); break;
+      }
+      case 'ai:applyActions': {
+        const actions = (args[0] && args[0].actions) || [];
+        const applied = actions.map((a) => ({ action: a, description: a.description || a.type }));
+        resolve({ ok: true, applied, failed: [], gameDir: '/预览模式' }); break;
+      }
+      case 'ai:rollback': resolve({ ok: true }); break;
       case 'shell:openPath': resolve({ ok: true }); break;
       case 'dialog:pickGameRoot': resolve('/预览模式/新的游戏目录'); break;
       case 'launcher:setGameRoot': { mockState.gameRoot = args[0]; mockState.settings.global.gameRootPrev = '/预览模式/.minecraft'; mockState.settings.global.gameRoot = args[0]; resolve({ ok: true, state: JSON.parse(JSON.stringify(mockState)) }); break; }
@@ -196,8 +242,8 @@ const mockApi = (channel, ...args) => new Promise((resolve) => {
           ok: true,
           info: {
             hasUpdate: !noUpd,
-            current: '1.2.0',
-            latest: noUpd ? '1.2.0' : '1.3.0',
+            current: '1.3.0',
+            latest: noUpd ? '1.3.0' : '1.4.0',
             notes: noUpd ? '' : '## NCL 1.3.0\n\n- 新增：启动器检查更新后可一键下载并安装\n- 优化：版本弹窗 Fabric 列表支持全量搜索\n- 修复：切换游戏目录后旧数据迁移入口\n\n[查看完整说明](https://github.com/911q2w3e1q/ncl/releases)',
             publishedAt: new Date().toISOString(),
             url: 'https://github.com/911q2w3e1q/ncl/releases/latest',
@@ -1629,10 +1675,12 @@ bindSettings();
 bindDownloadUI();
 bindSettingsPage();
 bindUpdateModal();
+if (typeof bindAiPanel === 'function') bindAiPanel();
 initDragDrop();
 bindDropTypeModal();
 bindWikiPage();
 refresh();
+if (typeof aiLoadConfig === 'function') aiLoadConfig();
 /* 预览 / 截图用：?modal=version / ?modal=account / ?modal=vsettings / ?modal=update 直接打开弹窗（方便截图看效果）；
  * ?modal=account&mstab=microsoft&mslogin=1 可打开微软标签页并模拟设备码登录流程。
  * Electron 调试同样生效（CUBE_PAGE 组合参数直达页面） */

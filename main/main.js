@@ -14,9 +14,11 @@ const crypto = require('crypto');
 const { spawn, execFile, fork } = require('child_process');
 const { Readable } = require('stream');
 const AdmZip = require('adm-zip');
+const aiAnalyzer = require('./ai-analyzer');
+const aiFixer = require('./ai-fixer');
 
 const LAUNCHER_NAME = 'NCL';
-const LAUNCHER_VERSION = '1.3.0';
+const LAUNCHER_VERSION = '1.4.0';
 const MANIFEST_URL = 'https://piston-meta.mojang.com/mc/game/version_manifest_v2.json';
 const JAVA_MANIFEST_URL = 'https://launchermeta.mojang.com/v1/products/java-runtime/2ec0cc96c44e5a76b9c8b7c39df7210883d12871/all.json';
 const GITHUB_REPO = '911q2w3e1q/ncl';
@@ -679,11 +681,69 @@ function saveAccounts(d) { saveJSON(accountsPath(), d); }
 function loadSettings() {
   return loadJSON(settingsPath(), {
     selectedVersionId: null,
-    global: { memory: 2048, javaPath: '', width: 854, height: 480, fullscreen: false, jvmArgs: '', isolation: false, serverAddress: '', mirror: false, accent: 'pink', background: '', backgroundName: '', gameRoot: '', gameRootPrev: '' },
+    global: { memory: 2048, javaPath: '', width: 854, height: 480, fullscreen: false, jvmArgs: '', isolation: false, serverAddress: '', mirror: false, accent: 'pink', background: '', backgroundName: '', gameRoot: '', gameRootPrev: '', ai: { ...aiAnalyzer.AI_DEFAULTS } },
     perVersion: {},
   });
 }
 function saveSettings(s) { saveJSON(settingsPath(), s); }
+
+/* ---------------- AI 报错分析（配置 / 现场采集 / 修复执行） ---------------- */
+
+/** 取 AI 配置（global.ai，缺失时用默认值） */
+function getAiConfig() {
+  const s = loadSettings();
+  return aiAnalyzer.normalizeAiConfig(s.global && s.global.ai);
+}
+
+/** 保存 AI 配置（只落 ai 字段，不动其他设置） */
+function saveAiConfig(patch) {
+  const s = loadSettings();
+  if (!s.global) s.global = {};
+  s.global.ai = aiAnalyzer.normalizeAiConfig({ ...(s.global.ai || {}), ...(patch || {}) });
+  saveSettings(s);
+  return s.global.ai;
+}
+
+/** 记住最近一次游戏的日志尾部，崩溃时供分析使用 */
+let lastGameLog = '';
+let lastGameContext = null;
+
+/** 记录游戏运行时上下文（版本 id / gameDir / 设置），供崩溃分析 */
+function rememberGameContext(versionId, gameDir) {
+  const settings = loadSettings();
+  lastGameContext = {
+    versionId,
+    gameDir,
+    settings: versionSettings(settings, versionId),
+  };
+}
+
+/** 触发一次崩溃分析（自动或手动），结果通过事件抛给渲染层 */
+async function runCrashAnalysis(trigger, extra) {
+  const cfg = getAiConfig();
+  const ctx = lastGameContext || {};
+  const versionJSON = ctx.versionId ? readLocalVersionJSON(ctx.versionId) : null;
+  const result = await aiAnalyzer.analyzeCrash(cfg, {
+    gameDir: ctx.gameDir || paths().root,
+    versionId: ctx.versionId,
+    versionJSON,
+    settings: ctx.settings,
+    logTail: lastGameLog,
+    exitCode: extra && extra.exitCode,
+    signal: extra && extra.signal,
+  });
+  if (win) {
+    win.webContents.send('launcher://ai-analysis', {
+      trigger: trigger || 'manual',
+      ok: result.ok,
+      error: result.error,
+      analysis: result.analysis,
+      versionId: ctx.versionId || '',
+    });
+  }
+  return result;
+}
+
 
 /** 合并全局与单版本设置 */
 function versionSettings(settings, versionId) {
@@ -1356,7 +1416,10 @@ async function launchGame(versionId, onLog) {
     }
     const cmd = buildLaunchCommand(versionId, account, settings);
     const vs = versionSettings(settings, versionId);
-    // Java 缺失时会自动下载：把进度抛给渲染层，避免按钮假死像“没反应”
+    // 记住本次运行上下文 + 累积日志，崩溃时供 AI 分析
+    rememberGameContext(versionId, cmd.gameDir);
+    lastGameLog = '';
+    // Java 缺失时会自动下载：把进度抛给渲染层，避免按钮假死像"没反应"
     const java = await ensureJava(vjson, vs.javaPath, (p) => { if (win) win.webContents.send('launcher://progress', p); });
     const finalArgs = [...cmd.jvmArgs, cmd.mainClass, ...cmd.gameArgs];
 
@@ -1365,7 +1428,11 @@ async function launchGame(versionId, onLog) {
 
     gameProc = spawn(java.path, finalArgs, { cwd: cmd.gameDir, env, detached: false });
     const proc = gameProc;
-    const send = (line) => { try { onLog(line); } catch { /* 渲染层可能已销毁 */ } };
+    const send = (line) => {
+      try { onLog(line); } catch { /* 渲染层可能已销毁 */ }
+      // 保留最近日志尾部（上限 200KB），供 AI 分析
+      lastGameLog = (lastGameLog + line + '\n').slice(-200 * 1024);
+    };
     const onData = (buf) => buf.toString('utf8').split(/\r?\n/).filter(Boolean).forEach(send);
     proc.stdout.on('data', onData);
     proc.stderr.on('data', onData);
@@ -1384,6 +1451,18 @@ async function launchGame(versionId, onLog) {
         if (settled) return;
         settled = true;
         gameProc = null;
+        // 崩溃判定：非 0 退出码，或被信号杀死 → 触发 AI 报错分析
+        const crashed = (code !== 0 && code !== null) || !!signal;
+        if (crashed) {
+          const cfg = getAiConfig();
+          if (cfg.enabled && cfg.autoAnalyze) {
+            // 异步分析，不阻塞退出流程
+            runCrashAnalysis('auto', { exitCode: code, signal }).catch(() => { /* 分析失败静默 */ });
+          } else if (win) {
+            // 未启用自动分析时，只通知渲染层崩溃了，由用户手动点「分析报错」
+            win.webContents.send('launcher://game-crashed', { code, signal, autoAnalyze: false });
+          }
+        }
         resolve({ code, signal });
       });
     });
@@ -1947,6 +2026,11 @@ function getState() {
       background: settings.global.background || '',
       backgroundName: settings.global.backgroundName || '',
     },
+    ai: {
+      enabled: !!(settings.global.ai && settings.global.ai.enabled),
+      hasKey: !!(settings.global.ai && settings.global.ai.apiKey),
+      autoAnalyze: settings.global.ai ? settings.global.ai.autoAnalyze !== false : true,
+    },
   };
 }
 
@@ -2120,6 +2204,74 @@ function registerIPC() {
   });
 
   ipcMain.handle('game:stop', () => ({ ok: stopGame() }));
+
+  /* ---------- AI 报错分析 ---------- */
+  ipcMain.handle('ai:getConfig', () => {
+    const cfg = getAiConfig();
+    // 回传时把 API Key 掩码，渲染层展示用
+    return { ...cfg, apiKeyMasked: cfg.apiKey ? `${cfg.apiKey.slice(0, 4)}****${cfg.apiKey.slice(-4)}` : '', hasKey: !!cfg.apiKey };
+  });
+
+  ipcMain.handle('ai:setConfig', (_, patch) => {
+    try {
+      const cur = getAiConfig();
+      // 渲染层回传掩码值时视为"不改动 Key"
+      const next = { ...patch };
+      if (next.apiKey === undefined || next.apiKey === null || next.apiKey === '' || /^\*{4}/.test(next.apiKey)) {
+        delete next.apiKey;
+      }
+      const saved = saveAiConfig({ ...cur, ...next });
+      return { ok: true, config: { ...saved, apiKeyMasked: saved.apiKey ? `${saved.apiKey.slice(0, 4)}****${saved.apiKey.slice(-4)}` : '', hasKey: !!saved.apiKey } };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('ai:test', async () => {
+    try {
+      return await aiAnalyzer.testConnection(getAiConfig());
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('ai:analyze', async (_, payload) => {
+    try {
+      const result = await runCrashAnalysis((payload && payload.trigger) || 'manual', payload || {});
+      return { ok: result.ok, error: result.error, analysis: result.analysis };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('ai:applyActions', (_, payload) => {
+    try {
+      const actions = (payload && payload.actions) || [];
+      const settings = loadSettings();
+      const gameDir = (lastGameContext && lastGameContext.gameDir) || paths().root;
+      const backupDir = path.join(paths().launcher, 'ai-backups');
+      const res = aiFixer.applyActions({
+        actions,
+        settings,
+        gameDir,
+        backupDir,
+        saveSettings,
+      });
+      return { ...res, gameDir };
+    } catch (e) {
+      return { ok: false, applied: [], failed: [{ action: null, error: e.message }] };
+    }
+  });
+
+  ipcMain.handle('ai:rollback', (_, payload) => {
+    try {
+      const backupPath = payload && payload.backupPath;
+      aiFixer.rollback(backupPath, saveSettings);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  });
 
   /* ---------- 下载中心 ---------- */
   ipcMain.handle('download:search', async (_, opts) => {
@@ -2333,6 +2485,7 @@ module.exports = {
   wikiVersionInfo, wikiPatchNotes,
   updaterCheck,
   installContent, installSingleFile, installModpack, contentGameDir, DL_CATEGORIES, BMCLAPI,
+  aiAnalyzer, aiFixer, getAiConfig, saveAiConfig, runCrashAnalysis, rememberGameContext,
   setGameRoot: (r) => { GAME_ROOT = r; for (const p of Object.values(paths())) ensureDir(p); },
   setLauncherDir: (d) => { LAUNCHER_DIR = d; ensureDir(d); },
   paths,
