@@ -63,7 +63,7 @@ input { font-family: inherit; }
 #topbar {
   height: 54px; flex: none;
   display: flex; align-items: center; gap: 6px;
-  background: var(--red);
+  background: linear-gradient(90deg, var(--accent-deep), var(--accent));
   padding: 0 8px 0 20px;
   -webkit-app-region: drag;
 }
@@ -465,6 +465,9 @@ input { font-family: inherit; }
 .ver-row .vtype.snapshot { background: var(--yellow-tint); color: var(--yellow-deep); border-color: var(--yellow-tint-border); }
 .ver-row .vtype.old { background: var(--purple-tint); color: var(--purple-deep); border-color: var(--purple-tint-border); }
 .ver-row .vtype.fabric, .ver-row .vtype.installed { background: var(--green-tint); color: var(--green-deep); border-color: var(--green-tint-border); }
+.ver-row .vtype.forge { background: #fff7ed; color: #c2410c; border-color: #fed7aa; }
+.ver-row .vtype.neoforge { background: #fef2f2; color: #b91c1c; border-color: #fecaca; }
+.ver-row .vtype.quilt { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
 .ver-row .vstate { font-size: 11.5px; font-weight: 700; color: var(--green); min-width: 44px; text-align: center; }
 .ver-row .btn { padding: 5px 13px; font-size: 12px; }
 .ver-empty { text-align: center; color: var(--muted); padding: 40px 0; font-size: 13px; }
@@ -945,3 +948,15 @@ input { font-family: inherit; }
   border-left: 3px solid var(--purple-tint-border); background: var(--hover);
   color: var(--muted);
 }
+
+/* ================= 自定义背景（theme:pickBackground） ================= */
+/* 负 z-index：衬在 body 画布之上、内容之下，不影响原有布局层 */
+#bg-layer {
+  position: fixed; inset: 0; z-index: -1;
+  background-size: cover; background-position: center; background-repeat: no-repeat;
+  pointer-events: none;
+}
+#bg-layer[hidden] { display: none; }
+/* 有自定义背景时：主区域改用半透明浅色蒙版，保证文字可读、卡片仍清晰 */
+body.has-bg #main { background: rgba(246, 248, 252, 0.88); }
+body.has-bg #topbar { box-shadow: 0 1px 0 rgba(0, 0, 0, 0.08); }

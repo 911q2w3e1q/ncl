@@ -13,19 +13,19 @@ const DEFAULT_SKINS = {
 /* ================= mock 预览模式 ================= */
 const mockState = {
   gameRoot: '/预览模式',
-  launcherVersion: '1.2.0',
+  launcherVersion: '1.3.0',
   sysMemoryMB: 16384,
   accounts: [{ id: 'mock-1', type: 'offline', name: 'Steve', uuid: '8f14e45f-ceea-467a-9f0c-8b8b0b0a1b2c', skinUrl: null, capeUrl: null, model: null }],
   selectedAccount: { id: 'mock-1', type: 'offline', name: 'Steve', uuid: '8f14e45f-ceea-467a-9f0c-8b8b0b0a1b2c', skinUrl: null, capeUrl: null, model: null },
   settings: {
     selectedVersionId: '1.20.1',
-    global: { memory: 4096, javaPath: '', width: 854, height: 480, fullscreen: false, jvmArgs: '', isolation: false, serverAddress: '', mirror: false, accent: 'pink', gameRoot: '/预览模式/.minecraft', gameRootPrev: '/预览模式/旧目录' },
+    global: { memory: 4096, javaPath: '', width: 854, height: 480, fullscreen: false, jvmArgs: '', isolation: false, serverAddress: '', mirror: false, accent: 'pink', background: '', backgroundName: '', gameRoot: '/预览模式/.minecraft', gameRootPrev: '/预览模式/旧目录' },
     perVersion: {},
   },
   installed: [
-    { id: '1.20.1', type: 'release', time: '2023-06-12', fabric: false },
-    { id: '1.16.5', type: 'release', time: '2021-01-15', fabric: false },
-    { id: 'fabric-loader-0.16.9-1.20.1', type: 'release', time: '2024-06-01', fabric: true },
+    { id: '1.20.1', type: 'release', time: '2023-06-12', fabric: false, loader: null, mc: '1.20.1' },
+    { id: '1.16.5', type: 'release', time: '2021-01-15', fabric: false, loader: null, mc: '1.16.5' },
+    { id: 'fabric-loader-0.16.9-1.20.1', type: 'release', time: '2024-06-01', fabric: true, loader: 'fabric', mc: '1.20.1' },
   ],
   running: false,
 };
@@ -121,6 +121,31 @@ const mockApi = (channel, ...args) => new Promise((resolve) => {
       case 'account:select': { mockState.selectedAccount = mockState.accounts.find((a) => a.id === args[0]); resolve(mockState); break; }
       case 'account:remove': { mockState.accounts = mockState.accounts.filter((a) => a.id !== args[0]); resolve(mockState); break; }
       case 'versions:select': { mockState.settings.selectedVersionId = args[0]; resolve(mockState); break; }
+      case 'versions:loaderCatalog': resolve({
+        ok: true,
+        catalog: {
+          forge: { '26.3': '58.1.0', '1.21.4': '54.1.3', '1.21.1': '52.1.0', '1.20.1': '47.1.3', '1.20.4': '49.0.19', '1.19.2': '43.3.13' },
+          neoforge: { '1.21.4': '21.4.100', '1.21.1': '21.1.72', '1.20.4': '20.4.100' },
+          quilt: { '1.21.4': '0.29.3', '1.21.1': '0.28.1', '1.20.1': '0.23.0' },
+        },
+      }); break;
+      case 'versions:installLoader': {
+        const { loader, mc } = args[0] || {};
+        const verMap = { forge: '47.1.3', neoforge: '20.4.100', quilt: '0.23.0' }[loader] || '1.0.0';
+        const id = loader === 'forge' ? `${mc}-${verMap}` : loader === 'neoforge' ? `neoforge-${verMap}` : `quilt-loader-${verMap}-${mc}`;
+        mockState.installed.push({ id, type: 'release', time: '2026-01-01', fabric: false, loader, mc });
+        resolve({ ok: true, id }); break;
+      }
+      case 'theme:pickBackground': {
+        mockState.settings.global.background = 'mock:';
+        mockState.settings.global.backgroundName = 'mock-像素晚霞.svg';
+        resolve({ ok: true, background: 'mock:', backgroundName: 'mock-像素晚霞.svg' }); break;
+      }
+      case 'theme:resetBackground': {
+        mockState.settings.global.background = '';
+        mockState.settings.global.backgroundName = '';
+        resolve({ ok: true }); break;
+      }
       case 'settings:save': {
         const patch = args[0] || {};
         if (patch.global) Object.assign(mockState.settings.global, patch.global);
@@ -394,11 +419,15 @@ function bindSettings() {
 
 /* ================= 启动器设置页（PCL 式结构：左分类 + 右卡片） ================= */
 const ACCENTS = {
-  pink:   { accent: '#ec4899', deep: '#db2777', tint: '#fdf2f8', border: '#fbcfe8' },
-  red:    { accent: '#e5484d', deep: '#c93539', tint: '#fef2f2', border: '#fecaca' },
-  yellow: { accent: '#f59e0b', deep: '#b45309', tint: '#fffbeb', border: '#fde68a' },
-  blue:   { accent: '#3b82f6', deep: '#2563eb', tint: '#eff6ff', border: '#bfdbfe' },
-  purple: { accent: '#8b5cf6', deep: '#6d28d9', tint: '#f5f3ff', border: '#ddd6fe' },
+  pink:     { accent: '#ec4899', deep: '#db2777', tint: '#fdf2f8', border: '#fbcfe8' },
+  red:      { accent: '#e5484d', deep: '#c93539', tint: '#fef2f2', border: '#fecaca' },
+  orange:   { accent: '#f97316', deep: '#c2410c', tint: '#fff7ed', border: '#fed7aa' },
+  yellow:   { accent: '#f59e0b', deep: '#b45309', tint: '#fffbeb', border: '#fde68a' },
+  green:    { accent: '#22c55e', deep: '#15803d', tint: '#f0fdf4', border: '#bbf7d0' },
+  cyan:     { accent: '#06b6d4', deep: '#0e7490', tint: '#ecfeff', border: '#a5f3fc' },
+  blue:     { accent: '#3b82f6', deep: '#2563eb', tint: '#eff6ff', border: '#bfdbfe' },
+  purple:   { accent: '#8b5cf6', deep: '#6d28d9', tint: '#f5f3ff', border: '#ddd6fe' },
+  graphite: { accent: '#64748b', deep: '#475569', tint: '#f8fafc', border: '#cbd5e1' },
 };
 function applyAccent(name) {
   const a = ACCENTS[name] || ACCENTS.pink;
@@ -407,6 +436,34 @@ function applyAccent(name) {
   s.setProperty('--accent-deep', a.deep);
   s.setProperty('--accent-tint', a.tint);
   s.setProperty('--accent-tint-border', a.border);
+}
+/* mock 模式（无 Electron 协议）下的演示背景：SVG 渐变 + 像素山丘 */
+const MOCK_BG_DATAURI = "data:image/svg+xml," + encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720">' +
+  '<defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">' +
+  '<stop offset="0" stop-color="#1e3a8a"/><stop offset=".55" stop-color="#7c3aed"/><stop offset="1" stop-color="#ec4899"/>' +
+  '</linearGradient></defs><rect width="1280" height="720" fill="url(%23sky)"/>' +
+  '<circle cx="1050" cy="150" r="62" fill="#fde68a" opacity=".9"/>' +
+  '<path d="M0 520 L180 380 L340 500 L520 350 L700 520 L880 420 L1060 540 L1280 440 L1280 720 L0 720 Z" fill="#0f172a" opacity=".82"/>' +
+  '<path d="M0 600 L220 500 L420 610 L640 520 L900 620 L1120 540 L1280 610 L1280 720 L0 720 Z" fill="#020617" opacity=".9"/>' +
+  '</svg>');
+/** 应用主题：强调色（含顶部导航栏）+ 背景图片 */
+function applyTheme(g) {
+  applyAccent((g && g.accent) || 'pink');
+  const layer = $('bg-layer');
+  if (!layer) return;
+  const bg = (g && g.background) || '';
+  if (!bg) { layer.hidden = true; layer.style.backgroundImage = 'none'; document.body.classList.remove('has-bg'); return; }
+  const url = bg === 'mock:' ? MOCK_BG_DATAURI : `ncl-bg://bg/${encodeURIComponent(bg)}`;
+  layer.hidden = false;
+  layer.style.backgroundImage = `url("${url}")`;
+  document.body.classList.add('has-bg');
+}
+/** 背景图片展示名（设置页用） */
+function bgDisplayName(g) {
+  const bg = (g && g.background) || '';
+  if (!bg) return '默认背景';
+  return (g && g.backgroundName) || bg;
 }
 const ACCOUNT_TYPE_LABELS = { offline: '离线', yggdrasil: 'LittleSkin', microsoft: '微软正版' };
 
@@ -435,9 +492,14 @@ function renderSettingsPage() {
   $('sp-isolation').checked = !!g.isolation;
   $('sp-server').value = g.serverAddress || '';
   $('sp-mirror').checked = !!g.mirror;
-  // 主题色
-  applyAccent(g.accent || 'pink');
+  // 主题（强调色 + 背景图片）
+  applyTheme(g);
   document.querySelectorAll('.set-swatch').forEach((b) => b.classList.toggle('active', b.dataset.accent === (g.accent || 'pink')));
+  // 背景图片卡片
+  const bgName = $('sp-bg-name');
+  if (bgName) { bgName.textContent = bgDisplayName(g); bgName.title = g.backgroundName || ''; }
+  const bgReset = $('sp-btn-reset-bg');
+  if (bgReset) bgReset.hidden = !g.background;
   // 启动器信息
   $('sp-gameroot').textContent = state.gameRoot || '—';
   $('sp-gameroot').title = state.gameRoot || '';
@@ -500,6 +562,32 @@ function bindSettingsPage() {
       document.querySelectorAll('.set-swatch').forEach((b) => b.classList.toggle('active', b === btn));
       toast('主题强调色已更新', true);
     };
+  });
+  // 背景图片：选择 / 恢复默认
+  $('sp-btn-pick-bg').addEventListener('click', async () => {
+    const btn = $('sp-btn-pick-bg');
+    btn.disabled = true; btn.textContent = '处理中…';
+    try {
+      const r = await api('theme:pickBackground');
+      if (r && r.ok === false) { toast(r.error || '设置背景失败'); return; }
+      if (r && r.canceled) return;
+      Object.assign(state.settings.global, { background: r.background || '', backgroundName: r.backgroundName || '' });
+      applyTheme(state.settings.global);
+      $('sp-bg-name').textContent = bgDisplayName(state.settings.global);
+      $('sp-bg-name').title = r.backgroundName || '';
+      $('sp-btn-reset-bg').hidden = !r.background;
+      toast('背景图片已更新', true);
+    } finally { btn.disabled = false; btn.textContent = '更改背景…'; }
+  });
+  $('sp-btn-reset-bg').addEventListener('click', async () => {
+    const r = await api('theme:resetBackground');
+    if (r && r.ok === false) return toast(r.error || '恢复默认失败');
+    Object.assign(state.settings.global, { background: '', backgroundName: '' });
+    applyTheme(state.settings.global);
+    $('sp-bg-name').textContent = '默认背景';
+    $('sp-bg-name').title = '';
+    $('sp-btn-reset-bg').hidden = true;
+    toast('已恢复默认背景', true);
   });
   // 打开游戏目录（shell.openPath：直接调系统文件管理器，跨平台不拼 file:// URL）
   $('sp-btn-open-root').addEventListener('click', async () => {
@@ -644,25 +732,38 @@ function bindUpdateModal() {
 /* ================= 版本弹窗 ================= */
 let verTab = 'installed';
 let verSearch = '';
+const LOADER_TABS = ['fabric', 'forge', 'neoforge', 'quilt'];
+const LOADER_LABELS = { fabric: 'Fabric', forge: 'Forge', neoforge: 'NeoForge', quilt: 'Quilt' };
+let loaderCatalogCache = null;
+async function getLoaderCatalog() {
+  if (!loaderCatalogCache) {
+    const r = await api('versions:loaderCatalog');
+    loaderCatalogCache = (r && r.ok && r.catalog) || {};
+  }
+  return loaderCatalogCache;
+}
 function openVersionModal() { $('modal-version').hidden = false; loadVerList(); }
 function closeModal(id) { $(id).hidden = true; }
 
 async function loadVerList() {
   if (!manifestCache) manifestCache = await api('versions:manifest');
   const installedIds = new Set(state.installed.map((v) => v.id));
-  // 已安装 Fabric 版本反查其 MC 版本（fabric-loader-0.16.9-1.20.1 → 1.20.1）
-  const fabInstalledMC = new Set(
-    state.installed.filter((v) => v.fabric).map((v) => (String(v.id).match(/^fabric-loader-.+?-(.+)$/) || [])[1]).filter(Boolean)
+  // 已安装的模组加载器版本反查其 MC 版本（主进程 listInstalled 已识别 loader / mc）
+  const loaderInstalledMC = (loader) => new Set(
+    state.installed.filter((v) => (v.loader || (v.fabric ? 'fabric' : null)) === loader && v.mc).map((v) => v.mc)
   );
   let list = [];
   if (verTab === 'installed') {
-    list = state.installed.map((v) => ({ id: v.id, type: v.fabric ? 'fabric' : 'installed', time: v.time, installed: true }));
-  } else if (verTab === 'fabric') {
-    // 全量正式版列表（可搜索）；已装过 Fabric 的版本直接标「已安装」
+    list = state.installed.map((v) => ({ id: v.id, type: v.loader || (v.fabric ? 'fabric' : 'installed'), time: v.time, installed: true }));
+  } else if (LOADER_TABS.includes(verTab)) {
+    // 全量正式版列表（可搜索）；已装过该 loader 的版本直接标「已安装」，行上显示最新 loader 版本号
+    const catalog = await getLoaderCatalog();
+    const catMap = catalog[verTab] || {};
+    const installedMC = loaderInstalledMC(verTab);
     list = manifestCache.versions
       .filter((v) => v.type === 'release')
       .slice(0, 400)
-      .map((v) => ({ ...v, type: 'fabric', installed: fabInstalledMC.has(v.id) }));
+      .map((v) => ({ ...v, type: verTab, installed: installedMC.has(v.id), loaderVer: catMap[v.id] || '' }));
   } else if (verTab === 'old') {
     list = manifestCache.versions.filter((v) => v.type.startsWith('old_'));
   } else {
@@ -675,27 +776,33 @@ async function loadVerList() {
   for (const v of list) {
     const row = document.createElement('div');
     row.className = 'ver-row';
-    const typeLabel = { release: '正式版', snapshot: '快照', old_beta: 'Beta', old_alpha: 'Alpha', fabric: 'Fabric', installed: '已安装' }[v.type] || v.type;
+    const typeLabel = { release: '正式版', snapshot: '快照', old_beta: 'Beta', old_alpha: 'Alpha', fabric: 'Fabric', forge: 'Forge', neoforge: 'NeoForge', quilt: 'Quilt', installed: '已安装' }[v.type] || v.type;
     const inst = installedIds.has(v.id);
     const sel = state.settings.selectedVersionId === v.id;
     row.innerHTML =
       `<span class="vname">${v.id}</span>` +
       `<span class="vtype ${v.type}">${typeLabel}</span>` +
-      `<span class="vmeta">${(v.releaseTime || v.time || '').slice(0, 10)}${sel ? ' · <b style="color:#93c5fd">当前选择</b>' : ''}</span>` +
+      `<span class="vmeta">${(v.releaseTime || v.time || '').slice(0, 10)}${v.loaderVer ? ` · ${LOADER_LABELS[v.type]} ${v.loaderVer}` : ''}${sel ? ' · <b style="color:#93c5fd">当前选择</b>' : ''}</span>` +
       `<span class="vstate">${inst ? '已装' : ''}</span>`;
     const btn = document.createElement('button');
     btn.className = 'btn';
-    if (v.type === 'fabric') {
+    if (LOADER_TABS.includes(v.type)) {
+      const label = LOADER_LABELS[v.type];
       if (v.installed) {
-        btn.textContent = '已装 Fabric';
+        btn.textContent = `已装 ${label}`;
         btn.disabled = true;
       } else {
-        btn.textContent = '安装 Fabric';
+        const installText = v.loaderVer ? `安装 ${label} ${v.loaderVer}` : `安装 ${label}`;
+        btn.textContent = installText;
         btn.onclick = async () => {
           btn.disabled = true; btn.textContent = '安装中…';
-          const r = await api('versions:installFabric', v.id);
-          if (r.ok) { toast(`${v.id} Fabric 安装完成`, true); await refresh(); loadVerList(); }
-          else { toast(r.error); btn.disabled = false; btn.textContent = '安装 Fabric'; }
+          installing = { id: v.id, btn };
+          const r = v.type === 'fabric'
+            ? await api('versions:installFabric', v.id)
+            : await api('versions:installLoader', { loader: v.type, mc: v.id });
+          installing = null;
+          if (r.ok) { toast(`${v.id} ${label} 安装完成`, true); await refresh(); loadVerList(); }
+          else { toast(r.error); btn.disabled = false; btn.textContent = installText; }
         };
       }
     } else if (inst) {
@@ -827,7 +934,7 @@ async function refresh() {
   renderVersionCard();
   renderSettingsCard();
   setLaunchButton(state.running ? 'running' : 'idle');
-  applyAccent((state.settings.global || {}).accent);
+  applyTheme(state.settings.global || {});
   if (currentPage === 'settings') renderSettingsPage();
 }
 

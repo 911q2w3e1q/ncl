@@ -6,7 +6,7 @@
  * ============================================================ */
 'use strict';
 
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, protocol, net } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -16,7 +16,7 @@ const { Readable } = require('stream');
 const AdmZip = require('adm-zip');
 
 const LAUNCHER_NAME = 'NCL';
-const LAUNCHER_VERSION = '1.2.0';
+const LAUNCHER_VERSION = '1.3.0';
 const MANIFEST_URL = 'https://piston-meta.mojang.com/mc/game/version_manifest_v2.json';
 const JAVA_MANIFEST_URL = 'https://launchermeta.mojang.com/v1/products/java-runtime/2ec0cc96c44e5a76b9c8b7c39df7210883d12871/all.json';
 const GITHUB_REPO = '911q2w3e1q/ncl';
@@ -33,15 +33,17 @@ let LAUNCHER_DIR = null;
 let win = null;
 
 function paths() {
-  const launcher = LAUNCHER_DIR || path.join(GAME_ROOT, 'launcher'); // 测试模式下回退旧行为
+  // GAME_ROOT 在 initPaths 里晚于 LAUNCHER_DIR 赋值，此处兜底避免 path.join(null)
+  const root = GAME_ROOT || LAUNCHER_DIR || process.cwd();
+  const launcher = LAUNCHER_DIR || path.join(root, 'launcher'); // 测试模式下回退旧行为
   return {
-    root: GAME_ROOT,
-    versions: path.join(GAME_ROOT, 'versions'),
-    libraries: path.join(GAME_ROOT, 'libraries'),
-    assets: path.join(GAME_ROOT, 'assets'),
-    objects: path.join(GAME_ROOT, 'assets', 'objects'),
-    indexes: path.join(GAME_ROOT, 'assets', 'indexes'),
-    runtime: path.join(GAME_ROOT, 'runtime'),
+    root,
+    versions: path.join(root, 'versions'),
+    libraries: path.join(root, 'libraries'),
+    assets: path.join(root, 'assets'),
+    objects: path.join(root, 'assets', 'objects'),
+    indexes: path.join(root, 'assets', 'indexes'),
+    runtime: path.join(root, 'runtime'),
     launcher,
     skins: path.join(launcher, 'skins'),
   };
@@ -307,6 +309,22 @@ function readLocalVersionJSON(id) {
   return exists(p) ? loadJSON(p, null) : null;
 }
 
+/** 从版本 JSON 的依赖库识别模组加载器类型 */
+function detectLoader(j) {
+  const names = (j.libraries || []).map((l) => l.name || '');
+  if (j._fabric || names.some((n) => /^net\.fabricmc:fabric-loader:/.test(n))) return 'fabric';
+  if (names.some((n) => /^net\.neoforged:/.test(n))) return 'neoforge';
+  if (names.some((n) => /^net\.minecraftforge:/.test(n))) return 'forge';
+  if (names.some((n) => /^org\.quiltmc:quilt-loader:/.test(n))) return 'quilt';
+  return null;
+}
+/** 加载器版本对应的 MC 版本（继承型 JSON 取 inheritsFrom，否则从 id 前缀解析） */
+function mcOfLoaderVersion(j, id) {
+  if (j && j.inheritsFrom) return j.inheritsFrom;
+  const m = String(id).match(/^(1\.\d+(?:\.\d+)?)(?:-|$)/);
+  return m ? m[1] : id;
+}
+
 function listInstalled() {
   const dir = paths().versions;
   if (!exists(dir)) return [];
@@ -314,7 +332,7 @@ function listInstalled() {
     .filter((d) => exists(path.join(dir, d, `${d}.json`)))
     .map((d) => {
       const j = loadJSON(path.join(dir, d, `${d}.json`), {});
-      return { id: d, type: j.type || 'release', time: j.releaseTime || j.time || '', fabric: !!j._fabric };
+      return { id: d, type: j.type || 'release', time: j.releaseTime || j.time || '', fabric: !!j._fabric, loader: detectLoader(j), mc: mcOfLoaderVersion(j, d) };
     })
     .sort((a, b) => (b.time || '').localeCompare(a.time || ''));
 }
@@ -661,7 +679,7 @@ function saveAccounts(d) { saveJSON(accountsPath(), d); }
 function loadSettings() {
   return loadJSON(settingsPath(), {
     selectedVersionId: null,
-    global: { memory: 2048, javaPath: '', width: 854, height: 480, fullscreen: false, jvmArgs: '', isolation: false, serverAddress: '', mirror: false, accent: 'pink', gameRoot: '', gameRootPrev: '' },
+    global: { memory: 2048, javaPath: '', width: 854, height: 480, fullscreen: false, jvmArgs: '', isolation: false, serverAddress: '', mirror: false, accent: 'pink', background: '', backgroundName: '', gameRoot: '', gameRootPrev: '' },
     perVersion: {},
   });
 }
@@ -776,18 +794,22 @@ async function ensureJava(versionJSON, javaPathOverride, onProgress) {
 /* ---------------- 版本安装（客户端 / 依赖库 / 资源 / Java） ---------------- */
 function applicableLibraries(versionJSON) {
   const out = [];
+  const BMCLAPI_MAVEN = 'https://bmclapi2.bangbang93.com/maven';
   for (const lib of versionJSON.libraries || []) {
     if (!evalRules(lib.rules)) continue;
     if (lib.downloads && lib.downloads.artifact) {
-      out.push({ lib, artifact: lib.downloads.artifact, mirrors: [lib.downloads.artifact.url] });
+      // 显式地址（Forge/NeoForge/Quilt 的库）：官方优先，BMCLAPI maven 镜像回退
+      const url = lib.downloads.artifact.url;
+      const bmcl = `${BMCLAPI_MAVEN}/${lib.downloads.artifact.path}`;
+      out.push({ lib, artifact: lib.downloads.artifact, mirrors: url === bmcl ? [url] : [url, bmcl] });
     } else {
       const p = mavenToPath(lib.name);
       if (p) {
-        // 无显式下载地址时按镜像依次尝试（原版库 / Fabric maven）
+        // 无显式下载地址时按镜像依次尝试（BMCLAPI / 原版库 / Fabric maven）
         out.push({
           lib,
-          artifact: { path: p, url: `https://libraries.minecraft.net/${p}` },
-          mirrors: [`https://libraries.minecraft.net/${p}`, `https://maven.fabricmc.net/${p}`],
+          artifact: { path: p, url: `${BMCLAPI_MAVEN}/${p}` },
+          mirrors: [`${BMCLAPI_MAVEN}/${p}`, `https://libraries.minecraft.net/${p}`, `https://maven.fabricmc.net/${p}`],
         });
       }
     }
@@ -1000,6 +1022,194 @@ async function installFabric(mcVersion, onProgress) {
   ensureDir(vdir);
   saveJSON(path.join(vdir, `${profile.id}.json`), profile);
   return await installVersion(profile.id, onProgress);
+}
+
+/* ---------------- Forge / NeoForge / Quilt 安装 ----------------
+ * 三者的官方安装器内部处理 install_profile / 二进制补丁 / 依赖库，手搓流程极易漏步骤，
+ * 统一走「下载官方 installer jar → 用托管 Java 运行 --installClient」路线，稳且省代码。
+ * 版本列表多源回退：官方优先，BMCLAPI 镜像兜底。 */
+const FORGE_PROMOTIONS_URL = 'https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json';
+const FORGE_MIRROR = 'https://bmclapi2.bangbang93.com/forge';
+const NEOFORGE_MAVEN_API = 'https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge';
+const QUILT_META = 'https://meta.quiltmc.org/v3';
+const QUILT_MAVEN = 'https://maven.quiltmc.org/repository/release';
+const LOADER_LABELS = { forge: 'Forge', neoforge: 'NeoForge', quilt: 'Quilt' };
+
+/** 版本号降序：稳定版排前，数字段逐段比对（支持 1.20.1-47.1.3 / 47.1.3 / 0.20.0-beta.9 混合） */
+function sortVersionsDesc(vers) {
+  const key = (v) => {
+    const stable = !/beta|alpha|pre|rc/i.test(String(v)) ? 1 : 0;
+    const nums = String(v).replace(/[^\d.]/g, ' ').trim().split(/[\s.]+/).filter(Boolean).map(Number);
+    return [stable, nums];
+  };
+  return [...new Set(vers)].sort((a, b) => {
+    const ka = key(a), kb = key(b);
+    if (ka[0] !== kb[0]) return kb[0] - ka[0];
+    const n = Math.max(ka[1].length, kb[1].length);
+    for (let i = 0; i < n; i++) {
+      const d = (kb[1][i] || 0) - (ka[1][i] || 0);
+      if (d) return d;
+    }
+    return String(a).localeCompare(String(b));
+  });
+}
+
+/** installer 运行所需 Java 主版本（按 MC 版本推导：1.21+→21，1.18+→17，1.17→16，更早→8） */
+function installerJavaMajor(mcVersion) {
+  const m = String(mcVersion).match(/^1\.(\d+)(?:\.(\d+))?$/);
+  if (!m) return 17;
+  const minor = parseInt(m[1], 10);
+  if (minor >= 21) return 21;
+  if (minor >= 18) return 17;
+  if (minor === 17) return 16;
+  return 8;
+}
+
+/** 选一个能跑 installer 的 Java：系统版本落在 [需求, 21] 就用，否则下载 Mojang 官方运行时 */
+async function pickInstallerJava(needMajor, onProgress) {
+  const sys = await detectSystemJava();
+  if (sys && sys.major >= needMajor && sys.major <= 21) return { ...sys, source: 'system' };
+  const component = COMPONENT_BY_MAJOR[needMajor] || 'java-runtime-gamma';
+  return await installMojangRuntime(component, onProgress);
+}
+
+/** Forge：官方 promotions 一次拿全量 {mc: 版本}（recommended 优先于 latest） */
+function parseForgePromotions(d) {
+  const out = {};
+  for (const [k, v] of Object.entries((d && d.promos) || {})) {
+    const mc = k.replace(/-(recommended|latest)$/, '');
+    if (k.endsWith('-recommended') || !out[mc]) out[mc] = String(v);
+  }
+  return out;
+}
+async function listForgeLatest() {
+  try { return parseForgePromotions(await fetchJSON(FORGE_PROMOTIONS_URL, 2)); }
+  catch { return {}; }
+}
+async function listForgeVersions(mc) {
+  try {
+    const d = await fetchFirstJSON([`${FORGE_MIRROR}/minecraft/${encodeURIComponent(mc)}`]);
+    return sortVersionsDesc((Array.isArray(d) ? d : []).map((x) => x.version || x.build).filter(Boolean));
+  } catch { return []; }
+}
+
+/** NeoForge 版本号前缀：MC 1.20.4 → "20.4"，1.21 → "21.0" */
+function neoforgePrefix(mc) {
+  const m = String(mc).match(/^1\.(\d+)(?:\.(\d+))?$/);
+  if (!m) return null;
+  return `${parseInt(m[1], 10)}.${m[2] ? parseInt(m[2], 10) : 0}`;
+}
+async function listNeoForgeAll() {
+  try {
+    const d = await fetchJSON(NEOFORGE_MAVEN_API, 2);
+    return (Array.isArray(d) ? d : (d && d.versions) || []).map(String).filter(Boolean);
+  } catch { return []; }
+}
+function neoforgeForMC(mc, all) {
+  const prefix = neoforgePrefix(mc);
+  if (!prefix) return [];
+  return sortVersionsDesc(all.filter((v) => v.startsWith(`${prefix}.`) || v.startsWith(`${prefix}-`)));
+}
+
+/** Quilt：官方 meta 按 MC 查 loader 列表 */
+async function listQuiltVersions(mc) {
+  try {
+    const d = await fetchFirstJSON([`${QUILT_META}/versions/loader/${encodeURIComponent(mc)}`]);
+    return sortVersionsDesc((Array.isArray(d) ? d : []).map((x) => (x.loader && x.loader.version) || x.version).filter(Boolean));
+  } catch { return []; }
+}
+async function latestQuiltInstaller() {
+  try {
+    const d = await fetchJSON(`${QUILT_META}/versions/installer`, 2);
+    const arr = Array.isArray(d) ? d : (d && d.installer) || [];
+    const s = sortVersionsDesc(arr.map((x) => x.version || x).filter(Boolean));
+    if (s.length) return s[0];
+  } catch { /* 忽略，走默认版本 */ }
+  return '0.9.3';
+}
+
+/** 渲染层展示用：每个 loader × 每个 MC 的最新稳定版映射（一次拿全量，避免逐 MC 请求） */
+async function loaderCatalog(manifest) {
+  const releases = (manifest || []).filter((v) => v.type === 'release').map((v) => v.id);
+  const out = { forge: await listForgeLatest(), neoforge: {}, quilt: {} };
+  const allNeo = await listNeoForgeAll();
+  for (const mc of releases) {
+    const vs = neoforgeForMC(mc, allNeo);
+    if (vs.length) out.neoforge[mc] = vs[0];
+  }
+  // Quilt 只支持较新的 MC，查最近 80 个正式版，控制请求量
+  await mapLimit(releases.slice(0, 80), 8, async (mc) => {
+    const vs = await listQuiltVersions(mc);
+    if (vs.length) out.quilt[mc] = vs[0];
+  });
+  return out;
+}
+
+/** 各 loader 的 installer jar 下载地址（多源回退） */
+function installerUrls(kind, mc, ver) {
+  if (kind === 'forge') {
+    const g = `${mc}-${ver}`;
+    return [
+      `https://bmclapi2.bangbang93.com/maven/net/minecraftforge/forge/${g}/forge-${g}-installer.jar`,
+      `https://maven.minecraftforge.net/net/minecraftforge/forge/${g}/forge-${g}-installer.jar`,
+    ];
+  }
+  if (kind === 'neoforge') {
+    return [`https://maven.neoforged.net/net/neoforged/neoforge/${ver}/neoforge-${ver}-installer.jar`];
+  }
+  return [`${QUILT_MAVEN}/org/quiltmc/quilt-installer/${ver}/quilt-installer-${ver}.jar`];
+}
+
+/** 运行官方 installer：跑前记录版本目录，跑后识别新增的 version id，再补跑 installVersion 补齐资源/Java */
+async function runLoaderInstaller(kind, jarPath, mc, loaderVer, onProgress) {
+  const P = paths();
+  const java = await pickInstallerJava(installerJavaMajor(mc), (p) => onProgress({ stage: 'loader', ...p }));
+  onProgress({ stage: 'loader', message: `运行 ${LOADER_LABELS[kind]} 安装器（Java ${java.major}${java.source === 'system' ? '，系统' : '，已自动下载'}）…`, percent: 40, speed: 0 });
+  ensureDir(P.versions);
+  const before = new Set(fs.readdirSync(P.versions));
+  const args = kind === 'quilt'
+    ? ['-jar', jarPath, 'install', 'client', mc, loaderVer, '--install-dir', P.root]
+    : ['-jar', jarPath, '--installClient', '--mc-dir', P.root];
+  const out = await new Promise((resolve) => {
+    execFile(java.path, args, { maxBuffer: 32 * 1024 * 1024, timeout: 15 * 60 * 1000 }, (err, stdout, stderr) => {
+      resolve({ err, text: String(stdout || '') + String(stderr || '') });
+    });
+  });
+  const created = fs.readdirSync(P.versions).filter((v) => !before.has(v));
+  const newId = created.find((v) => exists(path.join(P.versions, v, `${v}.json`))) || created[0];
+  if (!newId) {
+    throw new Error(`${LOADER_LABELS[kind]} 安装器未生成新版本${out.text ? `：${out.text.slice(-400)}` : ''}${out.err ? `（${out.err.message}）` : ''}`);
+  }
+  // installer 只写 version json 并下载自身依赖库；补跑 installVersion 幂等补齐资源 / Java
+  await installVersion(newId, onProgress);
+  return newId;
+}
+
+/** 安装入口：查最新稳定版 → 下载 installer → 运行 → 返回新版本 id */
+async function installLoader(kind, mc, onProgress, wantVersion = '') {
+  if (!LOADER_LABELS[kind]) throw new Error(`未知的模组加载器：${kind}`);
+  const latest = {
+    forge: async () => (await listForgeVersions(mc))[0],
+    neoforge: async () => neoforgeForMC(mc, await listNeoForgeAll())[0],
+    quilt: async () => (await listQuiltVersions(mc))[0],
+  }[kind];
+  const ver = String(wantVersion || '').trim() || (await latest());
+  if (!ver) throw new Error(`${LOADER_LABELS[kind]} 不支持 ${mc}`);
+  onProgress({ stage: 'loader', message: `下载 ${LOADER_LABELS[kind]} ${ver} 安装器…`, percent: 5, speed: 0 });
+  const tmpDir = path.join(paths().launcher, 'tmp');
+  ensureDir(tmpDir);
+  const jarPath = path.join(tmpDir, `${kind}-${mc}-${ver}-installer.jar`.replace(/[^\w.-]/g, '_'));
+  let lastErr = null;
+  for (const u of installerUrls(kind, mc, ver)) {
+    try { await downloadFile(u, jarPath); lastErr = null; break; }
+    catch (e) { lastErr = e; }
+  }
+  if (lastErr) throw new Error(`下载 ${LOADER_LABELS[kind]} 安装器失败：${lastErr.message}`);
+  try {
+    return await runLoaderInstaller(kind, jarPath, mc, kind === 'quilt' ? ver : '', onProgress);
+  } finally {
+    try { await fs.promises.unlink(jarPath); } catch { /* 临时文件清理失败不致命 */ }
+  }
 }
 
 /* ---------------- 启动参数构建 ---------------- */
@@ -1669,6 +1879,55 @@ async function updaterApply() {
   return { ok: true };
 }
 
+/* ---------------- 主题：背景图片（强调色沿用 settings.global.accent） ---------------- */
+const BG_MAX_BYTES = 12 * 1024 * 1024;
+const BG_EXTS = ['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif'];
+function backgroundsDir() { return path.join(paths().launcher, 'backgrounds'); }
+/** 校验待用背景图（纯函数，供测试复用）：返回 { ok, error } */
+function validateBgFile(src) {
+  const ext = path.extname(String(src || '')).toLowerCase();
+  if (!BG_EXTS.includes(ext)) return { ok: false, error: '仅支持 PNG / JPG / WebP / BMP / GIF 图片' };
+  let size = 0;
+  try { size = fs.statSync(src).size; } catch { return { ok: false, error: '文件不存在或无法读取' }; }
+  if (size > BG_MAX_BYTES) return { ok: false, error: '图片过大（超过 12MB），请换一张更小的图片' };
+  return { ok: true };
+}
+/** 选择并应用背景图片：复制到 backgrounds/，清掉旧文件，写入 settings */
+async function pickBackground() {
+  const r = await dialog.showOpenDialog(win, {
+    title: '选择背景图片', buttonLabel: '选择', properties: ['openFile'],
+    filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif'] }],
+  });
+  if (r.canceled || !r.filePaths[0]) return { ok: true, canceled: true };
+  const src = r.filePaths[0];
+  const v = validateBgFile(src);
+  if (!v.ok) return { ok: false, error: v.error };
+  const name = `bg-${Date.now()}${path.extname(src).toLowerCase()}`;
+  ensureDir(backgroundsDir());
+  await fs.promises.copyFile(src, path.join(backgroundsDir(), name));
+  const s = loadSettings();
+  s.global = { ...(s.global || {}) };
+  if (s.global.background && s.global.background !== name) {
+    try { fs.unlinkSync(path.join(backgroundsDir(), s.global.background)); } catch { /* 旧文件清理失败不致命 */ }
+  }
+  s.global.background = name;
+  s.global.backgroundName = path.basename(src);
+  saveSettings(s);
+  return { ok: true, background: name, backgroundName: s.global.backgroundName };
+}
+/** 恢复默认背景（删除背景文件 + 清空 settings 字段） */
+function resetBackground() {
+  const s = loadSettings();
+  s.global = { ...(s.global || {}) };
+  if (s.global.background) {
+    try { fs.unlinkSync(path.join(backgroundsDir(), s.global.background)); } catch { /* 忽略 */ }
+  }
+  s.global.background = '';
+  s.global.backgroundName = '';
+  saveSettings(s);
+  return { ok: true };
+}
+
 function getState() {
   const settings = loadSettings();
   const { accounts, selectedId } = loadAccounts();
@@ -1683,6 +1942,11 @@ function getState() {
     settings,
     installed: listInstalled(),
     running: !!gameProc,
+    theme: {
+      accent: settings.global.accent || 'pink',
+      background: settings.global.background || '',
+      backgroundName: settings.global.backgroundName || '',
+    },
   };
 }
 
@@ -1781,6 +2045,37 @@ function registerIPC() {
       if (win) win.webContents.send('launcher://progress', { stage: 'error', message: e.message, percent: 0, speed: 0 });
       return { ok: false, error: e.message };
     }
+  });
+
+  /* 模组加载器目录（Forge / NeoForge / Quilt 每 MC 最新稳定版，供版本弹窗展示） */
+  ipcMain.handle('versions:loaderCatalog', async () => {
+    try {
+      const manifest = await getManifest(false);
+      return { ok: true, catalog: await loaderCatalog(manifest.versions) };
+    } catch (e) { return { ok: false, error: e.message }; }
+  });
+
+  /* 安装 Forge / NeoForge / Quilt：version 缺省装最新稳定版 */
+  ipcMain.handle('versions:installLoader', async (_, payload) => {
+    const { loader, mc, version } = payload || {};
+    if (!LOADER_LABELS[loader]) return { ok: false, error: `未知的模组加载器：${loader}` };
+    try {
+      const id = await installLoader(loader, mc, (p) => { if (win) win.webContents.send('launcher://progress', p); }, version);
+      return { ok: true, id };
+    } catch (e) {
+      if (win) win.webContents.send('launcher://progress', { stage: 'error', message: e.message, percent: 0, speed: 0 });
+      return { ok: false, error: e.message };
+    }
+  });
+
+  /* 主题：选择背景图片 / 恢复默认 */
+  ipcMain.handle('theme:pickBackground', async () => {
+    try { return await pickBackground(); }
+    catch (e) { return { ok: false, error: e.message }; }
+  });
+  ipcMain.handle('theme:resetBackground', async () => {
+    try { return resetBackground(); }
+    catch (e) { return { ok: false, error: e.message }; }
   });
 
   ipcMain.handle('versions:select', (_, id) => {
@@ -1997,6 +2292,14 @@ if (process.env.CUBE_TEST_MODE !== '1') {
   app.whenReady().then(() => {
     initPaths();
     for (const p of Object.values(paths())) ensureDir(p);
+    /* 背景图自定义协议：ncl-bg://bg/<文件名> → backgrounds/ 下的文件（img/CSS 免 CORS 加载） */
+    protocol.handle('ncl-bg', (req) => {
+      let name = '';
+      try { name = path.basename(decodeURIComponent(new URL(req.url).pathname)); } catch { /* 忽略 */ }
+      const file = path.join(backgroundsDir(), name);
+      if (!name || !exists(file)) return new Response('Not Found', { status: 404 });
+      return net.fetch('file://' + file.replace(/\\/g, '/'));
+    });
     registerIPC();
     createWindow();
     app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
@@ -2021,8 +2324,10 @@ module.exports = {
   microsoftLogin, microsoftRefresh, msRequestDeviceCode, msExchangeToken, dashUuid,
   md5Uuid, mavenToPath, applicableLibraries,
   buildLaunchCommand, ensureJava, installMojangRuntime, installVersion, installFabric,
+  installLoader, loaderCatalog, listForgeVersions, listQuiltVersions, neoforgeForMC,
+  installerJavaMajor, neoforgePrefix, sortVersionsDesc, parseForgePromotions, validateBgFile,
   launchGame, stopGame, parseJavaMajor,
-  versionSettings, loadSettings, loadAccounts, readLocalVersionJSON,
+  versionSettings, loadSettings, saveSettings, loadAccounts, readLocalVersionJSON, listInstalled,
   javaPlatformKey, safeMemoryMB, semverCmp, sanitizeWikiHtml, platformAssetRe,
   modrinthSearch, modrinthProject, vanillaList,
   wikiVersionInfo, wikiPatchNotes,

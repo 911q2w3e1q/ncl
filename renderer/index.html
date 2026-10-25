@@ -7,6 +7,8 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+  <!-- 自定义背景层（设置页「更改背景…」后显示，ncl-bg:// 协议加载） -->
+  <div id="bg-layer" hidden aria-hidden="true"></div>
   <!-- 顶部红色导航栏（设计图：顶部通栏红线 + 刻度 = 导航项） -->
   <header id="topbar">
     <div class="brand">NCL</div>
@@ -307,15 +309,28 @@
             <div class="set-group-title">启动器</div>
 
             <div class="set-card">
-              <div class="set-info"><div class="set-name">主题强调色</div><div class="set-desc">设置页等面板界面的强调色，主界面配色保持不变</div></div>
+              <div class="set-info"><div class="set-name">主题强调色</div><div class="set-desc">顶部导航栏、按钮与高亮的配色，点选即换</div></div>
               <div class="set-ctrl">
                 <div class="set-swatches" id="sp-accent">
                   <button class="set-swatch" data-accent="pink" style="--sw:#ec4899" title="粉色"></button>
                   <button class="set-swatch" data-accent="red" style="--sw:#e5484d" title="红色"></button>
+                  <button class="set-swatch" data-accent="orange" style="--sw:#f97316" title="橙色"></button>
                   <button class="set-swatch" data-accent="yellow" style="--sw:#f59e0b" title="黄色"></button>
+                  <button class="set-swatch" data-accent="green" style="--sw:#22c55e" title="绿色"></button>
+                  <button class="set-swatch" data-accent="cyan" style="--sw:#06b6d4" title="青色"></button>
                   <button class="set-swatch" data-accent="blue" style="--sw:#3b82f6" title="蓝色"></button>
                   <button class="set-swatch" data-accent="purple" style="--sw:#8b5cf6" title="紫色"></button>
+                  <button class="set-swatch" data-accent="graphite" style="--sw:#64748b" title="石板灰"></button>
                 </div>
+              </div>
+            </div>
+
+            <div class="set-card">
+              <div class="set-info"><div class="set-name">背景图片</div><div class="set-desc">选择一张本地图片作为启动器背景；图片只存在本机 backgrounds 目录，不会上传</div></div>
+              <div class="set-ctrl set-ctrl-wide">
+                <span class="set-path" id="sp-bg-name">默认背景</span>
+                <button class="btn-ghost btn-sm" id="sp-btn-pick-bg">更改背景…</button>
+                <button class="btn-ghost btn-sm" id="sp-btn-reset-bg" hidden>恢复默认</button>
               </div>
             </div>
 
@@ -449,6 +464,9 @@
         <button class="mtab" data-tab="snapshot">快照</button>
         <button class="mtab" data-tab="old">历史版本</button>
         <button class="mtab" data-tab="fabric">Fabric</button>
+        <button class="mtab" data-tab="forge">Forge</button>
+        <button class="mtab" data-tab="neoforge">NeoForge</button>
+        <button class="mtab" data-tab="quilt">Quilt</button>
         <input type="search" id="ver-search" placeholder="搜索版本号…" />
       </div>
       <div class="modal-body" id="ver-list"></div>
