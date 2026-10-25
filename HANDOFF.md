@@ -1,7 +1,7 @@
-# NCL 开发交接文档（v1.2.0 已发布）
+# NCL 开发交接文档（v1.3.0 已发布）
 
-> 最后更新：2026-10-25 19:45（v1.2.0 Release 发布完成 + 源码推送完成）
-> 用途：会话上下文若被清理，新会话凭本文档 + 任务清单（TaskList #17–#23）无缝接手。
+> 最后更新：2026-10-25 21:20（v1.3.0 Release 发布完成：四大模组加载器 + 主题定制）
+> 用途：会话上下文若被清理，新会话凭本文档 + 任务清单无缝接手。
 
 ## 一、项目位置与运行方式
 
@@ -11,9 +11,41 @@
 - 发布仓库：GitHub `911q2w3e1q/ncl`
   - v1.0.0（仅 Windows）：https://github.com/911q2w3e1q/ncl/releases/tag/v1.0.0
   - v1.1.0（三平台）：https://github.com/911q2w3e1q/ncl/releases/tag/v1.1.0
-  - **v1.2.0（当前版）**：https://github.com/911q2w3e1q/ncl/releases/tag/v1.2.0
+  - v1.2.0（三平台）：https://github.com/911q2w3e1q/ncl/releases/tag/v1.2.0
+  - **v1.3.0（当前版）**：https://github.com/911q2w3e1q/ncl/releases/tag/v1.3.0
 
-## 二、任务清单状态（TaskList #17–#25 全部完成）
+## 二、v1.3.0 新增（TaskList #26–#30 全部完成）
+
+| # | 任务 | 主进程 | 渲染层 | 验证 |
+|---|---|---|---|---|
+| 26 | 模组加载器整合 | ✅ Forge/NeoForge/Quilt 目录查询 + 统一 installer 路线 | ✅ 四个独立页签 | loaders-theme-test ✅（11 断言） |
+| 27 | 主题定制 | ✅ 选图/复制/清背景 + accent 预设 | ✅ 背景层 + 9 套配色 + 顶栏渐变 | mock 冒烟 ✅（23 项） |
+| 28 | 版本升 1.3.0 | ✅ LAUNCHER_VERSION | ✅ mock | README + RELEASE_NOTES_v1.3.0.md ✅ |
+| 29 | 全量回归 | — | — | 10 套件全过 ✅（launch 因沙箱无显示属环境限制） |
+| 30 | 构建发布 v1.3.0 | — | — | 四资产上传 + 字节级核验 ✅ |
+
+### 关键实现要点（v1.3.0）
+
+**模组加载器**（`main/main.js`）
+- 版本弹窗 tab 由「原版/Fabric」扩为 `fabric / forge / neoforge / quilt`（`renderer/index.html` + `renderer.js` 的 `LOADER_TABS`）
+- 目录来源：Forge = `files.minecraftforge.net/.../promotions_slim.json`（promos 提取，recommended 优先）；NeoForge = `maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge`；Quilt = `meta.quiltmc.org/v3/versions/loader/{mc}`
+- NeoForge 版本号规则 `neoforgePrefix()`：MC 1.X.Y → `X.Y`（1.20.4→20.4，1.21→21.0）；不支持 MC 1.20.1
+- 统一安装路线 `runLoaderInstaller()`：下载官方 installer jar → 托管 Java 执行 `--installClient --mc-dir`（Quilt 用 `install client`）→ 扫描 `versions/` 新增项找 version id → 调 `installVersion(newId)` 幂等补齐资源/依赖库/Java
+- installer 所需 Java 按 MC 推导 `installerJavaMajor()`：1.21+→21、1.18+→17、1.17→16、更早→8；系统 Java 落在 [需求,21] 区间则复用，否则下载 Mojang runtime
+- `applicableLibraries` 的 mirrors 加 BMCLAPI maven 回退（`https://bmclapi2.bangbang93.com/maven/{path}`）
+- 已装识别 `detectLoader(j)`：从 libraries name 正则识别 `net.fabricmc:fabric-loader:` / `net.neoforged:` / `net.minecraftforge:` / `org.quiltmc:quilt-loader:`；`listInstalled` 返回附加 `loader` / `mc` 字段
+
+**主题定制**
+- 背景：设置页「更改背景…」→ `dialog.showOpenDialog` 选图 → `validateBgFile()`（扩展名白名单 png/jpg/jpeg/webp/bmp/gif + ≤12MB + 存在性）→ 复制到启动器数据目录 `backgrounds/bg-{ts}{ext}` → 删旧图 → 写 `settings.global.background/backgroundName`
+- 背景图通过自定义协议 `ncl-bg://` 提供给渲染层（`protocol.handle` + `net.fetch('file://...')`），避免大 base64 走 IPC；路径做了防穿越校验
+- 渲染层 `#bg-layer` 负 z-index 衬底 + `body.has-bg #main` 加 `rgba(246,248,252,.88)` 浅色蒙版保证深色背景下文字可读
+- 强调色：ACCENTS 从 5 套扩到 9 套（加 orange/green/cyan/graphite）；`#topbar` 背景改为 `linear-gradient(90deg, var(--accent-deep), var(--accent))`
+- 新 IPC：`versions:loaderCatalog`、`versions:installLoader`、`theme:pickBackground`、`theme:resetBackground`
+
+**顺手修的隐患**
+- `paths()` 在 `initPaths()` 里 `GAME_ROOT` 赋值前被 `loadSettings()` 调用 → `path.join(null)` 抛未捕获 Promise 拒绝（打包版启动可见，v1.2.0 遗留）。已改为 `const root = GAME_ROOT || LAUNCHER_DIR || process.cwd()`
+
+## 三、任务清单状态（TaskList #17–#25 全部完成）
 
 | # | 任务 | 主进程 | 渲染层 | 验证 |
 |---|---|---|---|---|
@@ -29,7 +61,7 @@
 | 24 | Electron 真机冒烟 | — | ✅ 7 张截图全过（xvfb + CUBE_SCREENSHOT/CUBE_PAGE/CUBE_MODAL） | v1.2.0 徽章确认 |
 | 25 | 构建三平台包并发布 v1.2.0 | — | — | ✅ 四资产上传字节级核验通过 |
 
-## 三、渲染层改动明细（renderer/）
+## 四、渲染层改动明细（renderer/）
 
 ### renderer/renderer.js
 - mockState 增加 `sysMemoryMB: 16384`、`launcherVersion: '1.2.0'`、`gameRoot/gameRootPrev`
@@ -59,7 +91,7 @@
 - mock Yggdrasil 服务器（CORS + OPTIONS）+ 静态 serve renderer/ + 注入忠实 `window.cube` stub
 - 流程：诊断 → 点登录 → 抓 `window.refresh()` 的 stack → 验证 acc-api 行与 5 连刷稳定性
 
-## 四、主进程改动（main/main.js，均已完成）
+## 五、主进程改动（main/main.js，均已完成）
 
 - 版本 `LAUNCHER_VERSION = '1.2.0'`
 - GAME_ROOT / LAUNCHER_DIR 分离 + 便携目录 + 旧数据迁移（`initPaths`）
@@ -73,7 +105,7 @@
 - exports 增加：`safeMemoryMB, semverCmp, sanitizeWikiHtml, platformAssetRe, wikiPatchNotes, updaterCheck, setGameRoot, setLauncherDir, paths`
 - createWindow 增加 `CUBE_MODAL` 环境变量透传（冒烟截图直达弹窗）
 
-## 五、测试状态（全绿）
+## 六、测试状态（全绿）
 
 | 测试文件 | 结果 |
 |---|---|
@@ -86,9 +118,9 @@
 | renderer/test-mock-smoke.js | ✅（更新弹窗/Fabric tab/迁移按钮/wiki-doc） |
 | renderer/test-ys-repro.js | ✅（LittleSkin 复现 + 修复回归） |
 
-跑全部：`for t in core crossplatform updater-wiki download import install java launch wiki coverage; do node test/$t-test.js; done`
+跑全部：`for t in core crossplatform updater-wiki download import install java launch wiki coverage loaders-theme; do node test/$t-test.js; done` + `node renderer/test-mock-smoke.js`
 
-## 六、v1.2.0 发布结果（2026-10-25 完成）
+## 七、v1.2.0 发布结果（2026-10-25 完成）
 
 - Release：https://github.com/911q2w3e1q/ncl/releases/tag/v1.2.0（id 423359571）
 - 资产（均经字节级核验 remote == local，state=uploaded）：
@@ -103,13 +135,38 @@
 - 源码：v1.2.0 提交已推送到 origin/main，tag v1.2.0 已从误指的 v1.1.0 提交（bf4c9d0）移到 v1.2.0 提交；v1.0.0/v1.1.0 Release 与 tag 未动
 - 发布说明：`RELEASE_NOTES_v1.2.0.md`
 
-## 七、后续可做（非阻塞）
+## 八、v1.3.0 发布结果（2026-10-25 完成）
+
+- Release：https://github.com/911q2w3e1q/ncl/releases/tag/v1.3.0（id 423417741）
+- 源码：main 已更新到 commit 4d9d3d69，tag v1.3.0 已指向同一 commit；v1.0.0/v1.1.0/v1.2.0 Release 与 tag 未动
+- 发布说明：`RELEASE_NOTES_v1.3.0.md`
+- 资产（构建脚本 `/tmp/build-130.sh`）：
+
+| 资产 | 字节数 |
+|---|---|
+| NCL-1.3.0-win64.zip | 134,240,239 |
+| NCL-1.3.0-linux-x64.tar.gz | 114,467,824 |
+| NCL-1.3.0-macos-arm64.zip | 108,578,332 |
+| NCL-1.3.0-macos-x64.zip | 113,415,838 |
+
+- 新增测试：`test/loaders-theme-test.js`（11 断言）；`renderer/test-mock-smoke.js` 扩到 23 项
+
+### 打包流程（复用要点）
+
+1. 复用 `/tmp/electron-{win,linux,darwin-arm64,darwin-x64}.zip`（Electron 37 发行包，缓存于 `/root/.cache/electron`）
+2. 解压后：Linux 保留 `engine/electron`，Windows 把 `electron.exe` 改名 `NCL.exe`；mac 保留 `Electron.app`，可执行文件改名 `NCL`，改 `Info.plist` 的 CFBundleName/DisplayName/版本号
+3. `resources/default_app.asar` 删除，`resources/app/` 放 `main/ renderer/ assets/ package.json node_modules/adm-zip`（**只带 adm-zip**，不带 electron devDependency）
+4. **mac 包必须 `zip -r -y`**：`zip` 默认解引用符号链接，会把 171MB 的 Electron Framework 重复打包，体积从 108MB 涨到 324MB
+5. Linux 另加 `NCL.sh`（`exec "$DIR/engine/electron" --no-sandbox "$DIR/engine/resources/app"`）、`ncl.desktop`、`ncl.png`、`使用说明.txt`
+6. 打包后用 xvfb 实测：`timeout 30 xvfb-run -a ./NCL.sh --disable-gpu`，dbus 报错无害，但不应出现 `UnhandledPromiseRejection`
+
+
 
 - Windows/macOS 真机启动验证（沙箱只有 Linux，已验证打包版 Linux 启动）
 - install-test.js 异常尾行排查
 - 若用户反馈新问题，按本任务清单模式续 TaskList
 
-## 八、踩坑记录（重要）
+## 九、踩坑记录（重要）
 
 - `gh release create` 多附件任一失败整体回滚；`gh release upload` 会挂死 → 用 curl 直传 `https://uploads.github.com/.../assets?name=`
 - **上传成功判断不能截断响应体**：asset JSON 的 `"state":"uploaded"` 字段在 300 字符之后，`head -c 300` 会漏掉导致误判失败、重复上传撞 422 already_exists；正确做法：HTTP 201 即成功，422 already_exists 时校验远端 size
