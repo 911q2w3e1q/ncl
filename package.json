@@ -1,0 +1,21 @@
+{
+  "name": "ncl",
+  "productName": "Nexus Craft Launcher",
+  "version": "1.0.0",
+  "description": "NCL — Nexus Craft Launcher，类 PCL 的 Minecraft 启动器：离线/LittleSkin 账户、版本管理、自动下载 Java 与依赖库、一键启动",
+  "main": "main/main.js",
+  "license": "MIT",
+  "author": "",
+  "scripts": {
+    "start": "electron .",
+    "test": "node test/core-test.js",
+    "test:install": "node test/install-test.js",
+    "test:launch": "node test/launch-test.js"
+  },
+  "dependencies": {
+    "adm-zip": "^0.5.16"
+  },
+  "devDependencies": {
+    "electron": "^37.2.0"
+  }
+}
