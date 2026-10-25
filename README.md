@@ -44,7 +44,20 @@
   - 详细视图左上角「← 返回」键回到简略视图
   - 数据完全来自版本清单 + 本机安装状态（可本地验证）；百科正文（更新内容 / 生物群系 / 命令等）因 minecraft.wiki 有反爬，通过底部按钮一键跳转系统浏览器
 
-## 运行
+## 下载（三平台兼容版 1.1.0）
+
+[GitHub Releases](https://github.com/911q2w3e1q/ncl/releases) 提供开箱即用的打包版本，无需 Node 环境：
+
+| 平台 | 包 | 用法 |
+| --- | --- | --- |
+| Windows 10/11 | `NCL-1.1.0-win64.zip` | 解压后双击 `NCL.exe`（与 `engine` 文件夹保持在一起） |
+| Linux x64 | `NCL-1.1.0-linux-x64.tar.gz` | 解压后执行 `./NCL.sh` |
+| macOS Apple Silicon | `NCL-1.1.0-macos-arm64.zip` | 解压后右键 → 打开 `NCL.app`（未签名，首次需右键绕过 Gatekeeper） |
+| macOS Intel | `NCL-1.1.0-macos-x64.zip` | 同上 |
+
+三平台共用同一套源码，游戏数据各存各的标准位置，互不干扰。1.0.0（仅 Windows）Release 仍保留，不影响老用户。
+
+## 运行（源码方式）
 
 ```bash
 npm install
@@ -59,6 +72,7 @@ node test/download-test.js  # 下载中心连通性（Modrinth 搜索/详情/分
 node test/coverage-test.js  # Modrinth 覆盖率回归（33 个主流模组含弯引号变体，验证删 CF 后内容库够用）
 node test/import-test.js   # 本地整合包导入端到端（最小 .mrpack → 装 1.20.1+Fabric → 解压 overrides）
 node test/wiki-test.js     # Wiki 版本信息（已安装/未安装/不存在 + Java 主版本/SHA1/jar 大小）
+node test/crossplatform-test.js  # 三平台启动参数（macOS -XstartOnFirstThread / classpath 分隔符 / Java 运行时平台键）
 npm run test:install  # 真实安装 1.20.1（客户端+库+资源+Java）
 npm run test:java     # 自动下载 Mojang 官方 Java 25 运行时并验证
 npm run test:launch   # 离线账户真实启动游戏（需 xvfb 环境）
@@ -83,7 +97,8 @@ NCL/
 │   ├── styles.css       # 浅色精致风，按钮统一蓝色
 │   └── renderer.js      # UI 逻辑 + mock 预览模式 + 皮肤头像绘制
 ├── assets/              # 应用图标、默认皮肤（真实 Steve/Alex 贴图）
-└── test/                # Node 直跑的核心逻辑测试
+├── tools/               # Windows 绿色版启动器源码（launcher.c，MinGW 编译）
+└── test/                # Node 直跑的核心逻辑测试（含三平台启动参数）
 ```
 
 ## 界面布局（按设计草图）
@@ -116,8 +131,9 @@ NCL/
 
 ## 说明
 
-- 游戏数据默认存放在 `<用户目录>/.config/Nexus Craft Launcher/minecraft`（Windows 为 `%APPDATA%\Nexus Craft Launcher\minecraft`），结构兼容官方启动器
+- 游戏数据默认存放在 `<用户目录>/.config/ncl/minecraft`（Windows 为 `%APPDATA%\ncl\minecraft`，macOS 为 `~/Library/Application Support/ncl/minecraft`），结构兼容官方启动器
 - 颜色不是最终版，当前为主题占位配色；交互按钮按约定统一为蓝色
+- 跨平台适配：macOS 下启动自动追加 `-XstartOnFirstThread`（LWJGL/GLFW 要求 JVM 主线程启动）；Java 运行时按平台自动选择 `windows-x64` / `mac-os-arm64` / `mac-os-x64` / `linux-x64` 变体；classpath 分隔符与 `LD_LIBRARY_PATH` 按平台处理
 
 ## 已验证（沙箱实测）
 
@@ -140,8 +156,11 @@ NCL/
 | 设置页四分类渲染与主题色切换 | 通过，截图见 `docs/` |
 | 拖拽导入 UI（遮罩 / zip 类型选择） | 通过，截图见 `docs/` |
 | Wiki 版本信息（Java 主版本 / 主类 / SHA1 / jar 大小 / 安装状态） | 通过（`test/wiki-test.js`） |
+| 三平台启动参数（macOS `-XstartOnFirstThread` / classpath `;` vs `:` / Java 运行时平台键） | 通过（`test/crossplatform-test.js`，14 项断言） |
 | Wiki 整合页两级视图与返回（简略 → 详细 → 返回）+ 搜索过滤 + 选项卡 | 通过，截图见 `docs/` |
 | 下载页真实数据截图（原版 / Mod 悬停详情） | 通过，见 `docs/` |
 | BMCLAPI 镜像路径（清单 / 版本 JSON / 客户端 / maven / 资源索引 / 资源对象） | 通过，实测 200 |
+| Linux 便携包真机启动（xvfb，界面 + Wiki 页渲染） | 通过，截图见 `docs/` |
+| 三平台打包（Windows ico / macOS icns 符号链接 / Linux `--no-sandbox`） | 通过，产物见 Release |
 
 > 无头环境下日志中的 authlib 401（离线模式查 Mojang 档案）、flite/ALSA 报错属预期噪音，不影响启动。

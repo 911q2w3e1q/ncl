@@ -1589,6 +1589,7 @@ module.exports = {
   buildLaunchCommand, ensureJava, installMojangRuntime, installVersion, installFabric,
   launchGame, stopGame, parseJavaMajor,
   versionSettings, loadSettings, loadAccounts, readLocalVersionJSON,
+  javaPlatformKey,
   modrinthSearch, modrinthProject, vanillaList,
   wikiVersionInfo,
   installContent, installSingleFile, installModpack, contentGameDir, DL_CATEGORIES, BMCLAPI,
