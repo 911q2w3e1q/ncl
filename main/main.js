@@ -19,9 +19,10 @@ const aiFixer = require('./ai-fixer');
 const aiModels = require('./ai-models');
 const aiLocal = require('./ai-local');
 const aiServer = require('./ai-server');
+const fabricApi = require('./fabric-api');
 
 const LAUNCHER_NAME = 'NCL';
-const LAUNCHER_VERSION = '1.6.0';
+const LAUNCHER_VERSION = '1.6.1';
 const MANIFEST_URL = 'https://piston-meta.mojang.com/mc/game/version_manifest_v2.json';
 const JAVA_MANIFEST_URL = 'https://launchermeta.mojang.com/v1/products/java-runtime/2ec0cc96c44e5a76b9c8b7c39df7210883d12871/all.json';
 const GITHUB_REPO = '911q2w3e1q/ncl';
@@ -1119,7 +1120,7 @@ async function fetchFirstJSON(paths_) {
   }
   throw lastErr || new Error('所有源均请求失败');
 }
-async function installFabric(mcVersion, onProgress, wantVersion = '') {
+async function installFabric(mcVersion, onProgress, wantVersion = '', opts = {}) {
   const enc = encodeURIComponent(mcVersion);
   const loaders = await fetchFirstJSON([`${FABRIC_META}/versions/loader/${enc}`, `${FABRIC_META_MIRROR}/versions/loader/${enc}`]);
   if (!loaders.length) throw new Error(`Fabric 不支持 ${mcVersion}`);
@@ -1138,7 +1139,19 @@ async function installFabric(mcVersion, onProgress, wantVersion = '') {
   const vdir = path.join(paths().versions, profile.id);
   ensureDir(vdir);
   saveJSON(path.join(vdir, `${profile.id}.json`), profile);
-  return await installVersion(profile.id, onProgress);
+  const result = await installVersion(profile.id, onProgress);
+
+  // Fabric API 是 Fabric 模组的必需依赖库，默认顺手装上（可在 UI 上关闭）
+  if (opts.withFabricApi !== false) {
+    try {
+      const api = await fabricApi.installFabricApi(mcVersion, contentGameDir(), onProgress, fetchJSON, downloadFile);
+      result.fabricApi = api;
+    } catch (e) {
+      // API 装不上不影响加载器本身已装成功，只记录提示
+      result.fabricApi = { skipped: `Fabric API 安装失败：${e.message}`, path: '', version: '' };
+    }
+  }
+  return result;
 }
 
 /* ---------------- Forge / NeoForge / Quilt 安装 ----------------
@@ -2212,11 +2225,23 @@ function registerIPC() {
   ipcMain.handle('versions:installFabric', async (_, payload) => {
     const mcVersion = typeof payload === 'string' ? payload : (payload && payload.mc);
     const wantVersion = typeof payload === 'string' ? '' : ((payload && payload.version) || '');
+    const withFabricApi = typeof payload === 'string' ? true : ((payload && payload.withFabricApi) !== false);
     try {
-      const result = await installFabric(mcVersion, (p) => { if (win) win.webContents.send('launcher://progress', p); }, wantVersion);
+      const result = await installFabric(mcVersion, (p) => { if (win) win.webContents.send('launcher://progress', p); }, wantVersion, { withFabricApi });
       return { ok: true, result };
     } catch (e) {
       if (win) win.webContents.send('launcher://progress', { stage: 'error', message: e.message, percent: 0, speed: 0 });
+      return { ok: false, error: e.message };
+    }
+  });
+
+  /* Fabric API 可用版本列表（安装器里展示「同时安装 Fabric API」时用） */
+  ipcMain.handle('fabricApi:versions', async (_, payload) => {
+    const mcVersion = (payload && payload.mc) || '';
+    try {
+      const versions = await fabricApi.listFabricApiVersions(mcVersion, fetchJSON);
+      return { ok: true, versions: versions.map((v) => ({ id: v.id, versionNumber: v.versionNumber, date: v.date })) };
+    } catch (e) {
       return { ok: false, error: e.message };
     }
   });

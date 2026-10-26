@@ -44,10 +44,20 @@ app.whenReady().then(async () => {
   `);
   await sleep(1200);
 
+  // 取下载列表第一项（原版游戏）的真实版本号，不写死
+  const mc = await win.webContents.executeJavaScript(`
+    (() => {
+      const first = document.querySelector('#dl-list .dl-item');
+      const t = first && (first.dataset.id || (first.querySelector('.dl-item-title') || {}).textContent);
+      return (t && String(t).trim()) || '26.3';
+    })()
+  `);
+  console.log('使用 MC 版本：', mc);
+
   for (const s of SHOTS) {
     await win.webContents.executeJavaScript(`
       (() => {
-        if (typeof openLoaderPicker === 'function') openLoaderPicker('1.21.4');
+        if (typeof openLoaderPicker === 'function') openLoaderPicker(${JSON.stringify(mc)});
         const tab = document.querySelector('#dl-loader-tabs .mtab[data-loader="${s.loader}"]');
         if (tab) tab.click();
         return true;

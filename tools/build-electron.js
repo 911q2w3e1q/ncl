@@ -22,8 +22,12 @@ const ROOT = path.join(__dirname, '..');
 /* ---------------- 参数 ---------------- */
 const argv = process.argv.slice(2);
 function arg(name, dflt) {
-  const hit = argv.find((a) => a.startsWith(`--${name}=`));
-  return hit ? hit.slice(name.length + 3) : dflt;
+  // 同时支持 `--name=value` 与 `--name value` 两种写法
+  const i = argv.findIndex((a) => a === `--${name}` || a.startsWith(`--${name}=`));
+  if (i < 0) return dflt;
+  const a = argv[i];
+  if (a.includes('=')) return a.slice(a.indexOf('=') + 1);
+  return argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : dflt;
 }
 const PLATFORM = arg('platform', process.platform);
 const ARCH = arg('arch', process.arch);

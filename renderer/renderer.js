@@ -131,13 +131,19 @@ const mockApi = (channel, ...args) => new Promise((resolve) => {
       }); break;
       case 'versions:loaderVersions': {
         const { loader, mc } = args[0] || {};
+        // 真实版本号（取自各加载器官方 API，2026-10 数据）
         const pool = {
-          fabric: ['0.16.10', '0.16.9', '0.16.5', '0.15.11', '0.15.6'],
-          forge: ['47.1.3', '47.1.0', '43.3.13', '43.2.14', '40.2.8'],
-          neoforge: ['21.4.100', '21.4.95', '21.1.72', '20.4.100'],
-          quilt: ['0.29.3', '0.28.1', '0.26.2', '0.23.0'],
+          fabric: ['0.20.1', '0.20.0', '0.19.5', '0.19.4', '0.19.3'],
+          forge: ['58.1.0', '54.1.3', '52.1.0', '47.1.3', '43.3.13'],
+          neoforge: ['21.4.100', '21.1.72', '20.4.100', '20.4.95'],
+          quilt: ['0.20.0-beta.9', '0.19.4', '0.18.2', '0.17.0'],
         }[loader] || [];
         resolve({ ok: true, loader, mc, versions: pool });
+      } break;
+      case 'fabricApi:versions': {
+        const mc = (args[0] || {}).mc || '1.21.4';
+        const v = mc === '26.1.2' ? '0.155.3+26.1.2' : '0.116.0+' + mc;
+        resolve({ ok: true, versions: [{ id: 'mock-' + mc, versionNumber: v, date: '2026-04-09' }] });
       } break;
       case 'versions:installLoader': {
         const { loader, mc } = args[0] || {};
@@ -1305,7 +1311,32 @@ function openLoaderPicker(mcVersion) {
   $('dl-loader-search').value = '';
   $('modal-loader').hidden = false;
   document.querySelectorAll('#dl-loader-tabs .mtab').forEach((b) => b.classList.toggle('active', b.dataset.loader === 'fabric'));
+  dlLoaderSyncApiRow();
+  dlLoaderLoadApiVersion();
   dlLoaderRender();
+}
+
+/** Fabric API 勾选项只在 Fabric 页签显示（其它加载器不需要它） */
+function dlLoaderSyncApiRow() {
+  const row = $('dl-fabric-api-row');
+  if (!row) return;
+  row.hidden = dlLoader.loader !== 'fabric';
+}
+
+/** 查该 MC 版本有没有 Fabric API，并在勾选项旁显示具体版本号 */
+async function dlLoaderLoadApiVersion() {
+  const desc = $('dl-fabric-api-desc');
+  if (!desc) return;
+  try {
+    const r = await api('fabricApi:versions', { mc: dlLoader.mc });
+    if (r && r.ok && r.versions && r.versions.length) {
+      desc.textContent = `（多数 Fabric 模组的必需依赖 · ${r.versions[0].versionNumber}）`;
+    } else {
+      desc.textContent = '（该游戏版本暂无 Fabric API）';
+    }
+  } catch {
+    desc.textContent = '（多数 Fabric 模组的必需依赖）';
+  }
 }
 
 async function dlLoaderRender() {
@@ -1340,11 +1371,16 @@ async function dlLoaderRender() {
     btn.onclick = async () => {
       btn.disabled = true;
       btn.textContent = '安装中…';
+      const withApi = dlLoader.loader === 'fabric' && ($('dl-fabric-api') || {}).checked !== false;
       const r2 = dlLoader.loader === 'fabric'
-        ? await api('versions:installFabric', { mc: dlLoader.mc, version: v })
+        ? await api('versions:installFabric', { mc: dlLoader.mc, version: v, withFabricApi: withApi })
         : await api('versions:installLoader', { loader: dlLoader.loader, mc: dlLoader.mc, version: v });
       if (r2 && r2.ok) {
-        toast(`${dlLoader.mc} ${LOADER_LABELS[dlLoader.loader]} ${v} 安装完成`, true);
+        const apiInfo = r2.result && r2.result.fabricApi;
+        let msg = `${dlLoader.mc} ${LOADER_LABELS[dlLoader.loader]} ${v} 安装完成`;
+        if (apiInfo && apiInfo.version) msg += `，Fabric API ${apiInfo.version} 已装好`;
+        else if (apiInfo && apiInfo.skipped) msg += `（${apiInfo.skipped}）`;
+        toast(msg, true);
         $('modal-loader').hidden = true;
         await refresh();
       } else {
@@ -1363,6 +1399,7 @@ function dlLoaderInit() {
     b.onclick = () => {
       dlLoader.loader = b.dataset.loader;
       document.querySelectorAll('#dl-loader-tabs .mtab').forEach((x) => x.classList.toggle('active', x === b));
+      dlLoaderSyncApiRow();
       dlLoaderRender();
     };
   });

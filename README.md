@@ -48,6 +48,8 @@
   - 一键安装：Mod / 资源包 / 光影包 / 数据包装入当前版本游戏目录（尊重版本隔离）；Modrinth 整合包自动解析 `modrinth.index.json`、装基础版本与 Fabric、下载全部文件并解压 overrides；原版分类支持镜像站加速
   - **本地导入**：Modrinth 上没有的内容（如 CurseForge 独占模组 / 整合包），从网页下载后点「导入本地文件」——jar 直接装入对应目录，整合包 zip 自动走解析安装
   - **拖拽导入**（PCL 式）：把 .jar / .zip / .mrpack 直接拖到窗口任意位置——jar 自动装为 Mod；zip 弹类型选择（整合包 / 资源包 / 光影包 / 数据包），整合包同样走完整解析安装
+  - **模组加载器安装**（v1.6.1）：点原版游戏 → 选加载器（Fabric / Forge / NeoForge / Quilt）→ 选具体版本 → 一键安装
+    - **装 Fabric 时顺手装 Fabric API**（默认勾选，版本号实时从 Modrinth 拉）——不用再自己切到 Mod 页搜「Fabric API」手动装；不想要可取消勾选
 - **启动器设置**（顶部导航「设置」，结构参考 PCL：左侧分类导航 + 右侧设置卡片，配色用 NCL 强调色系）
   - 游戏设置：内存上限（按系统内存封顶）、Java 路径（自动 / 手动）、窗口分辨率 / 全屏、JVM 参数、版本隔离、**自动进入服务器**（1.20+ quickPlay）、**下载加速**（原版安装走 BMCLAPI 镜像）
   - 外观：**自定义背景图**（选择本地文件夹图片，png/jpg/webp/bmp/gif，≤12MB，复制入启动器数据目录，可一键恢复默认）、**预设强调色 9 套**（粉 / 红 / 黄 / 蓝 / 紫 / 橙 / 绿 / 青 / 石墨，顶部导航栏同步换色渐变）
@@ -67,22 +69,24 @@
   - **官方更新日志页内直读**：详细视图下方直接渲染 Mojang 官方更新日志全文（HTML 白名单净化，链接新窗口打开），不再跳网页；官方源未收录的版本保留「在 Minecraft Wiki 查看」外链兜底
   - 结构化数据完全来自版本清单 + 本机安装状态（可本地验证）
 
-## 下载（v1.6.0）
+## 下载（v1.6.1）
 
 [GitHub Releases](https://github.com/911q2w3e1q/ncl/releases) 提供开箱即用的打包版本，无需 Node 环境：
 
 | 平台 | 包 | 用法 |
 | --- | --- | --- |
-| **Windows 10/11（Electron 版，最新版）** | **`NCL-1.6.0-win64.zip`** | **解压后双击顶层 `NCL.exe` 即可（无 `engine/` 目录，运行时已瘦身至 ~100 MB）** |
+| **Windows 10/11（Electron 版，最新版）** | **`NCL-1.6.1-win64.zip`** | **解压后双击顶层 `NCL.exe` 即可（无 `engine/` 目录，运行时已瘦身至 ~105 MB）** |
 | Windows 7 SP1 / 8 / 10 / 11（.NET 版） | `NCL-1.5.0-win64-dotnet.zip` | 解压后双击 `NCL.exe`，仅 3 个文件，内存占用约为 Electron 版的 1/5 |
-| Windows 10/11（Electron 版，旧版） | `NCL-1.5.0-win64.zip` | 解压后双击 `NCL.exe`（与 `engine` 文件夹保持在一起） |
+| Windows 10/11（Electron 版，旧版） | `NCL-1.6.0-win64.zip` | 解压后双击 `NCL.exe`（与 `engine` 文件夹保持在一起） |
 | Linux x64 | `NCL-1.5.0-linux-x64.tar.gz` | 解压后执行 `./NCL.sh` |
 | macOS Apple Silicon | `NCL-1.5.0-macos-arm64.zip` | 解压后右键 → 打开 `NCL.app`（未签名，首次需右键绕过 Gatekeeper） |
 | macOS Intel | `NCL-1.5.0-macos-x64.zip` | 同上 |
 
-**v1.6.0 的变化**：网页内核 Windows 版把主程序从 `engine/` 挪回顶层（`NCL.exe` 直接双击），并裁掉了 55 个语言包、Chromium 许可全文、D3D12 编译器、软件 Vulkan 等启动器用不到的部分，zip 从 ~135 MB 降到 ~100 MB。同时新增了**免 API Key 的内置本地小模型 AI**。
+**v1.6.1 的变化**：装 Fabric 加载器时**顺手把 Fabric API 一起装上**（弹窗底部默认勾选，版本号实时从 Modrinth 拉）——不用再自己切到 Mod 页搜「Fabric API」手动装了。1.6.0 的免 API Key 本地小模型 AI 与顶层 exe 瘦身同样保留。
 
-两个 Windows 包**并存使用、互不覆盖**：想要最新功能（含本地 AI）与完整界面特效选 `1.6.0` 的 Electron 版，想要低内存与 Win7 兼容选 `.NET` 版。1.0.0 – 1.5.0 Release 仍保留，不影响老用户。
+**v1.6.0 的变化**：网页内核 Windows 版把主程序从 `engine/` 挪回顶层（`NCL.exe` 直接双击），并裁掉了 55 个语言包、Chromium 许可全文、D3D12 编译器、软件 Vulkan 等启动器用不到的部分，zip 从 ~135 MB 降到 ~105 MB。同时新增了**免 API Key 的内置本地小模型 AI**。
+
+两个 Windows 包**并存使用、互不覆盖**：想要最新功能（含本地 AI 与 Fabric API 一键安装）与完整界面特效选 `1.6.1` 的 Electron 版，想要低内存与 Win7 兼容选 `.NET` 版。1.0.0 – 1.6.0 Release 仍保留，不影响老用户。
 
 **更新方式**：设置 → 启动器 → 检查更新 → 下载并安装，启动器会自动重启完成替换（也可直接下载新版包手动覆盖）。
 

@@ -450,6 +450,16 @@ input { font-family: inherit; }
 }
 .mf-hint { font-size: 12px; color: var(--muted); }
 
+/* Fabric API 勾选项（加载器弹窗底部，仅 Fabric 时显示） */
+.mf-check {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 12px; color: var(--text); cursor: pointer; user-select: none;
+  white-space: nowrap;
+}
+.mf-check input { accent-color: var(--blue); cursor: pointer; margin: 0; }
+.mf-check-desc { color: var(--muted); }
+.mf-check[hidden] { display: none; }
+
 /* 版本列表 */
 .ver-row {
   display: flex; align-items: center; gap: 12px; padding: 10px 12px;

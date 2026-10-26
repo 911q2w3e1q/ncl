@@ -1,7 +1,34 @@
-# NCL 开发交接文档（v1.6.0 开发中）
+# NCL 开发交接文档（v1.6.1 开发中）
 
-> 最后更新：2026-10-26（v1.6.0：网页内核 Windows 版重构 + 内置本地 AI）
+> 最后更新：2026-10-26（v1.6.1：加载器安装流程加入 Fabric API）
 > 用途：会话上下文若被清理，新会话凭本文档 + 任务清单无缝接手。
+
+## 〇点五、v1.6.1 新增（加载器安装流程加入 Fabric API）
+
+**用户提问**：「where are the fabric API？」——1.6.0 装完 Fabric 后还要自己去 Mod 页搜「Fabric API」手动装，流程断了一截。
+
+### 改动
+
+| 文件 | 变更 |
+|---|---|
+| `main/fabric-api.js`（**新增**） | `listFabricApiVersions(mcVersion, fetchJSON)` 查 Modrinth `/project/P7dR8mSH/version?game_versions=[mc]`；`installFabricApi(mcVersion, gameDir, onProgress, fetchJSON, downloadFile)` 下载 primary jar 到 `<gameDir>/mods/` |
+| `main/main.js` | `installFabric` 新增第 4 参 `opts.withFabricApi`（默认 true）；装完加载器后调 `fabricApi.installFabricApi`，**API 装不上不影响加载器已成功**（记 `fabricApi.skipped`）；新增 IPC `fabricApi:versions`；`LAUNCHER_VERSION` → 1.6.1 |
+| `renderer/index.html` | 加载器弹窗底部加 `#dl-fabric-api-row` 勾选项（默认勾选）+ `#dl-fabric-api-desc` 版本号占位 |
+| `renderer/styles.css` | 新增 `.mf-check` / `.mf-check-desc` |
+| `renderer/renderer.js` | `dlLoaderSyncApiRow()` 只在 Fabric 页签显示勾选项；`dlLoaderLoadApiVersion()` 异步拉版本号；安装按钮读勾选传 IPC；mock 新增 `versions:loaderVersions` / `fabricApi:versions` 渠道 |
+| `test/fabric-api-test.js`（**新增**） | 11 项单测 |
+| `test/shot-loader.js` | 修写死的 `openLoaderPicker('1.21.4')` → 自动读下载列表第一项真实版本号（现取到 26.3） |
+
+### 关键决策
+
+- **只对 Fabric 生效**：Forge / NeoForge / Quilt 页签自动隐藏该勾选项
+- **不阻断**：该 MC 版本暂无 Fabric API 时返回 `skipped`，加载器照常装完
+- **版本号实时**：从 Modrinth 拉该 MC 版本对应的最新 fabric-api，不是写死
+
+### 实测
+
+- 单测 11/11 通过
+- 真实端到端（连 Modrinth）：`fabric-api-0.155.3+26.1.2.jar`，2,521,340 字节，zip 头 `504b0304` ✓，落在 `mods/` 下
 
 ## 〇、v1.6.0 新增（网页内核 Windows 版 + 本地 AI）
 
