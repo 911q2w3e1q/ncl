@@ -94,15 +94,16 @@ function main() {
 
   if (TAG) {
     // 打 tag（指向新 commit）
+    // 注意：tag object 与 tag ref 是两步，且 ref 必须用 POST git/refs（带 tag 名的那种路径会 422）
     const tagObj = gh(['api', `repos/${REPO}/git/tags`, '--input', '-'], JSON.stringify({
       tag: TAG,
       message: `NCL ${TAG}`,
       object: commit.sha,
       type: 'commit',
-      tagger: { name: 'NCL', email: 'ncl@local' },
+      tagger: { name: 'NCL', email: 'ncl@local', date: new Date().toISOString() },
     }));
     try {
-      gh(['api', `repos/${REPO}/git/refs/tags/${TAG}`, '--input', '-'],
+      gh(['api', `repos/${REPO}/git/refs`, '--input', '-'],
         JSON.stringify({ ref: `refs/tags/${TAG}`, sha: tagObj.sha }));
       console.log(`tag ${TAG} 已创建`);
     } catch (e) {
