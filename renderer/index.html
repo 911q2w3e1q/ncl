@@ -503,9 +503,19 @@
               </div>
               <div class="wd-facts" id="wd-facts"></div>
               <div class="wd-notes" id="wd-notes" hidden></div>
+              <!-- 站内百科：内嵌浏览器直接渲染中文 Minecraft Wiki（原生中文，无需翻译） -->
+              <div class="wd-browser" id="wd-browser">
+                <div class="wdb-bar">
+                  <span class="wdb-label" id="wd-browser-label">中文 Minecraft Wiki</span>
+                  <span class="wdb-url" id="wd-browser-url"></span>
+                  <button class="wdb-btn" id="wd-browser-reload" title="重新加载">⟳</button>
+                  <button class="wdb-btn" id="wd-browser-external" title="在系统浏览器打开">↗</button>
+                </div>
+                <webview class="wdb-view" id="wd-browser-view" allowpopups></webview>
+              </div>
               <div class="wd-note">
                 <p>以上结构化信息来自版本清单与本机已安装数据，均可本地验证；更新日志来自 Mojang 官方源。</p>
-                <p>更全面的生物群系、命令、机制等百科资料请查看 Minecraft Wiki：</p>
+                <p>下方为站内嵌入的<b>中文 Minecraft Wiki</b> 词条（原生中文，无需翻译）。也可在系统浏览器中打开：</p>
                 <button class="wiki-link-btn" id="wiki-btn-open">
                   <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M14 3v2h3.6l-9.3 9.3 1.4 1.4L19 6.4V10h2V3h-7Zm-2 16H5V7h5V5H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5h-2v5Z"/></svg>
                   <span id="wiki-btn-open-text">在 Minecraft Wiki 查看</span>

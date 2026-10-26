@@ -20,9 +20,10 @@ const aiModels = require('./ai-models');
 const aiLocal = require('./ai-local');
 const aiServer = require('./ai-server');
 const fabricApi = require('./fabric-api');
+const wikiProbe = require('./wiki-probe');
 
 const LAUNCHER_NAME = 'NCL';
-const LAUNCHER_VERSION = '1.6.1';
+const LAUNCHER_VERSION = '1.6.2';
 const MANIFEST_URL = 'https://piston-meta.mojang.com/mc/game/version_manifest_v2.json';
 const JAVA_MANIFEST_URL = 'https://launchermeta.mojang.com/v1/products/java-runtime/2ec0cc96c44e5a76b9c8b7c39df7210883d12871/all.json';
 const GITHUB_REPO = '911q2w3e1q/ncl';
@@ -1600,6 +1601,8 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      // 站内嵌入中文 Minecraft Wiki（webview 承载真实浏览器渲染）
+      webviewTag: true,
     },
   });
   const { pathToFileURL } = require('url');
@@ -2547,6 +2550,14 @@ function registerIPC() {
   ipcMain.handle('wiki:patchNotes', async (_, versionId) => {
     try {
       return { ok: true, notes: await wikiPatchNotes(versionId) };
+    } catch (e) { return { ok: false, error: e.message }; }
+  });
+
+  /* Wiki 整合：探测该版本该用中文站还是英文站（中文词条缺失时自动回退英文） */
+  ipcMain.handle('wiki:target', async (_, versionId) => {
+    try {
+      const target = await wikiProbe.resolveWikiTarget(versionId);
+      return { ok: true, target };
     } catch (e) { return { ok: false, error: e.message }; }
   });
 

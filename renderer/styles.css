@@ -931,6 +931,32 @@ input { font-family: inherit; }
   display: block; max-width: 100%; border-radius: 10px; margin: 4px 0 12px;
   border: 1px solid var(--border);
 }
+
+/* ================= Wiki 站内百科（内嵌 webview） ================= */
+.wd-browser {
+  background: #fff; border: 1px solid var(--purple-tint-border); border-radius: 12px;
+  margin-bottom: 20px; overflow: hidden;
+}
+.wdb-bar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px; border-bottom: 1px solid var(--purple-tint-border);
+  background: #f7f5ff;
+}
+.wdb-label { font-size: 12.5px; font-weight: 800; color: var(--purple-deep); white-space: nowrap; }
+.wdb-url {
+  flex: 1; min-width: 0; font-size: 11.5px; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.wdb-btn {
+  flex: none; width: 26px; height: 26px; border-radius: 7px; cursor: pointer;
+  border: 1px solid var(--purple-tint-border); background: #fff; color: var(--purple-deep);
+  font-size: 14px; line-height: 1; display: inline-flex; align-items: center; justify-content: center;
+  transition: 0.12s;
+}
+.wdb-btn:hover { background: var(--purple-tint); border-color: var(--purple); }
+.wdb-view {
+  display: block; width: 100%; height: 520px; border: 0; background: #fff;
+}
 .wiki-doc { font-size: 13px; line-height: 1.85; color: var(--ink); }
 .wiki-doc > :first-child { margin-top: 0; }
 .wiki-doc > :last-child { margin-bottom: 0; }

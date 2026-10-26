@@ -47,7 +47,7 @@ app.whenReady().then(async () => {
   // 取下载列表第一项（原版游戏）的真实版本号，不写死
   const mc = await win.webContents.executeJavaScript(`
     (() => {
-      const first = document.querySelector('#dl-list .dl-item');
+      const first = document.querySelector('#dl-items .dl-item');
       const t = first && (first.dataset.id || (first.querySelector('.dl-item-title') || {}).textContent);
       return (t && String(t).trim()) || '26.3';
     })()

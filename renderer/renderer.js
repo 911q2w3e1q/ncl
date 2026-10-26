@@ -252,6 +252,21 @@ const mockApi = (channel, ...args) => new Promise((resolve) => {
         });
         break;
       }
+      case 'wiki:target': {
+        const id = args[0] || '1.20.1';
+        // 浏览器预览用：直接指向中文 wiki 词条
+        const page = `Java版${id}`;
+        resolve({
+          ok: true,
+          target: {
+            lang: 'zh',
+            host: 'https://zh.minecraft.wiki',
+            page,
+            url: `https://zh.minecraft.wiki/w/${encodeURIComponent(page)}`,
+          },
+        });
+        break;
+      }
       case 'updater:check': {
         const noUpd = new URLSearchParams(location.search).get('upd') === 'noupd';
         resolve({
@@ -1612,6 +1627,7 @@ const wiki = {
   selectedId: null,
   view: 'brief', // 'brief' 简略 | 'detail' 详细
   detailCache: {},
+  targetCache: {}, // versionId → { lang, host, page, url }
 };
 
 function wikiInstalledSets() {
@@ -1749,6 +1765,79 @@ async function wikiShowDetail(id) {
   $('wiki-btn-open-text').textContent = `在 Minecraft Wiki 查看 ${id}`;
   $('wiki-btn-open').onclick = () => api('shell:openExternal', info.wikiUrl);
   wikiLoadNotes(id);
+  wikiLoadBrowser(id);
+}
+
+/* 站内百科：内嵌 webview 打开中文 Minecraft Wiki 词条
+ * 中文站原生中文，无需翻译；中文词条缺失时主进程探测会自动回退英文站。 */
+async function wikiLoadBrowser(id) {
+  const wrap = $('wd-browser');
+  const view = $('wd-browser-view');
+  if (!wrap || !view) return;
+  wrap.hidden = false;
+  $('wd-browser-label').textContent = '中文 Minecraft Wiki';
+  $('wd-browser-url').textContent = '正在定位词条…';
+
+  let target = wiki.targetCache[id];
+  if (!target) {
+    try {
+      const r = await api('wiki:target', id);
+      target = r && r.ok ? r.target : null;
+    } catch { target = null; }
+    wiki.targetCache[id] = target;
+  }
+  // 期间用户可能已切走
+  if (wiki.selectedId !== id || wiki.view !== 'detail') return;
+  if (!target || !target.url) {
+    $('wd-browser-url').textContent = '未能定位词条，可点右上角 ↗ 在浏览器打开';
+    return;
+  }
+  $('wd-browser-label').textContent = target.lang === 'zh' ? '中文 Minecraft Wiki' : 'Minecraft Wiki（英文）';
+  $('wd-browser-url').textContent = target.url;
+  // 同一 URL 不重复加载，避免切页时闪烁
+  if (view.getAttribute('src') !== target.url) {
+    view.setAttribute('src', target.url);
+  }
+  $('wd-browser-external').onclick = () => api('shell:openExternal', target.url);
+  $('wd-browser-reload').onclick = () => {
+    if (view.getAttribute('src')) view.setAttribute('src', target.url);
+  };
+}
+
+/* webview 加载完成后：跳过顶部大横幅，滚到正文（词条信息表）起始处 */
+function wikiBrowserOnReady() {
+  const view = $('wd-browser-view');
+  if (!view) return;
+  // 同一个 webview 会多次触发 dom-ready，这里按当前词条判断
+  view.addEventListener('dom-ready', async () => {
+    const id = wiki.selectedId;
+    if (!id || wiki.view !== 'detail') return;
+    try {
+      // 等页面把信息表渲染出来
+      await new Promise((r) => setTimeout(r, 1200));
+      const scrolled = await view.executeJavaScript(`
+        (() => {
+          try {
+            // 中文 wiki 顶部横幅很高，直接滚到信息表（infobox）所在位置
+            const info = document.querySelector('.infobox');
+            const box = document.querySelector('.mw-parser-output');
+            let y = 0;
+            if (info) {
+              y = info.getBoundingClientRect().top + window.scrollY - 12;
+            } else if (box) {
+              y = box.getBoundingClientRect().top + window.scrollY - 12;
+            }
+            window.scrollTo(0, Math.max(0, y));
+            return Math.round(window.scrollY);
+          } catch (e) { return -1; }
+        })()
+      `);
+      if (scrolled >= 0) {
+        // 滚完等一帧，确保内容已绘制
+        await new Promise((r) => setTimeout(r, 500));
+      }
+    } catch { /* 页面还没准备好，下次 dom-ready 再试 */ }
+  });
 }
 
 /* 官方更新日志：Mojang 源全文，页内直接渲染（主进程已做 HTML 白名单净化） */
@@ -1811,6 +1900,7 @@ initDragDrop();
 bindDropTypeModal();
 dlLoaderInit();
 bindWikiPage();
+wikiBrowserOnReady();
 refresh();
 if (typeof aiLoadConfig === 'function') aiLoadConfig();
 /* 预览 / 截图用：?modal=version / ?modal=account / ?modal=vsettings / ?modal=update 直接打开弹窗（方便截图看效果）；

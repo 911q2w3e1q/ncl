@@ -1,7 +1,41 @@
-# NCL 开发交接文档（v1.6.1 开发中）
+# NCL 开发交接文档（v1.6.2 开发中）
 
-> 最后更新：2026-10-26（v1.6.1：加载器安装流程加入 Fabric API）
+> 最后更新：2026-10-26（v1.6.2：Wiki 站内百科改用内嵌浏览器直出中文）
 > 用途：会话上下文若被清理，新会话凭本文档 + 任务清单无缝接手。
+
+## 〇点六、v1.6.2 新增（Wiki 站内百科内嵌浏览器）
+
+**用户提问**：「这玩意不是Chrome内核吗？Chrome是浏览器呀，你直接以浏览器的方式查询并汉化不就行了吗？」——此前 Wiki 是「自己抓 API + 自己翻译」，产物全英文且译文质量不稳。1.6.2 改成**内嵌真实浏览器直接渲染中文站**。
+
+### 改动
+
+| 文件 | 变更 |
+|---|---|
+| `main/wiki-probe.js`（**新增**） | `zhPageName(v)` → `Java版<版本号>`；`enPageName(v)` → `Java_Edition_<版本号>`；`pageExists(host, page)` 走 MediaWiki `action=query` 探测；`resolveWikiTarget(v)` 中文优先、无词条回退英文，6 小时缓存 |
+| `main/main.js` | `webPreferences.webviewTag: true`；新增 IPC `wiki:target`；`LAUNCHER_VERSION` → 1.6.2 |
+| `main/preload.js` | IPC 白名单加 `wiki:target` |
+| `renderer/index.html` | Wiki 详细视图插入 `#wd-browser` 区块（工具条 label/url/刷新/外链 + `<webview id="wd-browser-view">`） |
+| `renderer/styles.css` | 新增 `.wd-browser` / `.wdb-bar` / `.wdb-label` / `.wdb-url` / `.wdb-btn` / `.wdb-view` |
+| `renderer/renderer.js` | `wikiLoadBrowser(id)` 取探测结果设 webview src + 绑按钮；`wikiBrowserOnReady()` 监听 `dom-ready` 后 1.2s 自动滚到 `.infobox`；`wiki.targetCache` 缓存；mock 新增 `wiki:target` |
+| `test/wiki-browser-test.js`（**新增**） | 8 项测试（含「正文含中文字符」） |
+| `test/loader-picker-test.js` / `test/shot-loader.js` | **修正选择器 `#dl-list` → `#dl-items`**（前者根本不存在，导致列表取空、截图版本号回落成默认值） |
+
+### 关键决策
+
+- **不抓取、不翻译**：中文站原生汉化，直接用 `<webview>` 承载真实浏览器渲染
+- **中文优先 + 英文兜底**：中文站无该版本词条时回退英文站，顶部标签切换提示
+- **必须真实 Chromium**：中文 Wiki 全端点有 JS PoW 反爬，curl/fetch 只能拿到「Please wait」中间页
+
+### 实测
+
+- wiki-browser-test 8/8 通过
+- 内嵌页标题 `Java版26.2 - 中文 Minecraft Wiki`，正文含「正式名称 混沌立方」「发布时间 2026年6月16日」
+- 截图：`docs/NCL界面-Wiki站内百科-中文.png`、`docs/NCL界面-Wiki中文词条正文.png`
+
+### 踩坑
+
+- **webview 内容截不到图**：外层 `capturePage()` 拿不到 webview 的完整绘制；webview 自身 `capturePage()` 返回 0×0；`desktopCapturer` 在 xvfb 下拿不到窗口。绕行：独立 BrowserWindow 加载同一页面截图
+- **滚���目标**：优先 `.infobox`（top≈250）而不是 `.mw-parser-output`（top≈116），后者会把正文推到视野外
 
 ## 〇点五、v1.6.1 新增（加载器安装流程加入 Fabric API）
 

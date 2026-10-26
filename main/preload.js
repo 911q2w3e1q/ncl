@@ -13,7 +13,7 @@ const INVOKE_CHANNELS = new Set([
   'ai:getConfig', 'ai:setConfig', 'ai:test', 'ai:analyze', 'ai:applyActions', 'ai:rollback',
   'ai:localModels', 'ai:localDownload', 'ai:localRemove', 'ai:localReady',
   'download:search', 'download:detail', 'download:install', 'content:importFile', 'content:importPath',
-  'wiki:versionInfo', 'wiki:patchNotes',
+  'wiki:versionInfo', 'wiki:patchNotes', 'wiki:target',
   'updater:check', 'updater:download', 'updater:apply',
   'shell:openPath', 'shell:openExternal',
   'window:minimize', 'window:maximize', 'window:close',

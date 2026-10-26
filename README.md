@@ -67,26 +67,30 @@
   - 右侧灰色内容区两级视图：点列表项显示**简略资料**（大版本号、类型徽章、发布日期、安装状态、Fabric），点红色「查看详细资料」按钮进入**详细视图**（Java 主版本、资源索引、主类、客户端大小与 SHA1、继承版本等 9 项结构化事实）
   - 详细视图左上角「← 返回」键回到简略视图
   - **官方更新日志页内直读**：详细视图下方直接渲染 Mojang 官方更新日志全文（HTML 白名单净化，链接新窗口打开），不再跳网页；官方源未收录的版本保留「在 Minecraft Wiki 查看」外链兜底
+  - **站内百科内嵌中文 Minecraft Wiki**（v1.6.2）：详细视图下方直接内嵌真实浏览器渲染中文 Wiki 词条（`Java版<版本号>`），**原生中文、不再自己抓取翻译**；加载完自动定位到信息框；中文站无该词条时自动回退英文站；工具条可刷新 / 用系统浏览器打开
   - 结构化数据完全来自版本清单 + 本机安装状态（可本地验证）
 
-## 下载（v1.6.1）
+## 下载（v1.6.2）
 
 [GitHub Releases](https://github.com/911q2w3e1q/ncl/releases) 提供开箱即用的打包版本，无需 Node 环境：
 
 | 平台 | 包 | 用法 |
 | --- | --- | --- |
-| **Windows 10/11（Electron 版，最新版）** | **`NCL-1.6.1-win64.zip`** | **解压后双击顶层 `NCL.exe` 即可（无 `engine/` 目录，运行时已瘦身至 ~105 MB）** |
+| **Windows 10/11（Electron 版，最新版）** | **`NCL-1.6.2-win64.zip`** | **解压后双击顶层 `NCL.exe` 即可（无 `engine/` 目录，运行时已瘦身至 ~105 MB）** |
+| Windows 10/11（Electron 版，上一版） | `NCL-1.6.1-win64.zip` | 解压后双击顶层 `NCL.exe`（含 Fabric API 一键安装，Wiki 仍为抓取翻译版） |
 | Windows 7 SP1 / 8 / 10 / 11（.NET 版） | `NCL-1.5.0-win64-dotnet.zip` | 解压后双击 `NCL.exe`，仅 3 个文件，内存占用约为 Electron 版的 1/5 |
 | Windows 10/11（Electron 版，旧版） | `NCL-1.6.0-win64.zip` | 解压后双击 `NCL.exe`（与 `engine` 文件夹保持在一起） |
 | Linux x64 | `NCL-1.5.0-linux-x64.tar.gz` | 解压后执行 `./NCL.sh` |
 | macOS Apple Silicon | `NCL-1.5.0-macos-arm64.zip` | 解压后右键 → 打开 `NCL.app`（未签名，首次需右键绕过 Gatekeeper） |
 | macOS Intel | `NCL-1.5.0-macos-x64.zip` | 同上 |
 
+**v1.6.2 的变化**：Wiki 资料页**内嵌真实浏览器直出中文 Minecraft Wiki**（`Java版<版本号>` 词条，原生中文、不再自己抓取翻译；中文站无词条时自动回退英文站）。1.6.1 的 Fabric API 一键安装与 1.6.0 的免 API Key 本地小模型 AI、顶层 exe 瘦身同样保留。
+
 **v1.6.1 的变化**：装 Fabric 加载器时**顺手把 Fabric API 一起装上**（弹窗底部默认勾选，版本号实时从 Modrinth 拉）——不用再自己切到 Mod 页搜「Fabric API」手动装了。1.6.0 的免 API Key 本地小模型 AI 与顶层 exe 瘦身同样保留。
 
 **v1.6.0 的变化**：网页内核 Windows 版把主程序从 `engine/` 挪回顶层（`NCL.exe` 直接双击），并裁掉了 55 个语言包、Chromium 许可全文、D3D12 编译器、软件 Vulkan 等启动器用不到的部分，zip 从 ~135 MB 降到 ~105 MB。同时新增了**免 API Key 的内置本地小模型 AI**。
 
-两个 Windows 包**并存使用、互不覆盖**：想要最新功能（含本地 AI 与 Fabric API 一键安装）与完整界面特效选 `1.6.1` 的 Electron 版，想要低内存与 Win7 兼容选 `.NET` 版。1.0.0 – 1.6.0 Release 仍保留，不影响老用户。
+两个 Windows 包**并存使用、互不覆盖**：想要最新功能（含本地 AI、Fabric API 一键安装与中文 Wiki 内嵌）与完整界面特效选 `1.6.2` 的 Electron 版，想要低内存与 Win7 兼容选 `.NET` 版。1.0.0 – 1.6.1 Release 仍保留，不影响老用户。
 
 **更新方式**：设置 → 启动器 → 检查更新 → 下载并安装，启动器会自动重启完成替换（也可直接下载新版包手动覆盖）。
 
