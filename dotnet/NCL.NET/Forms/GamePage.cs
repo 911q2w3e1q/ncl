@@ -20,15 +20,15 @@ namespace Ncl.Forms
         private Button _btnLaunch;
         private Button _btnAccount;
         private Button _btnSwitchVersion;
-        private ProgressBar _launchBar;
+        private RoundProgressBar _launchBar;
         private Label _launchText;
         private int _logLines;
-
         public GamePage()
         {
             BackColor = Theme.Bg;
             Build();
             RefreshAll();
+            Theme.Apply(this);
         }
 
         private void Build()
@@ -117,8 +117,8 @@ namespace Ncl.Forms
                 ReadOnly = true,
                 ScrollBars = ScrollBars.Both,
                 WordWrap = false,
-                BackColor = Theme.Bg,
-                ForeColor = Theme.TextDim,
+                BackColor = Color.FromArgb(250, 250, 251),
+                ForeColor = Theme.Text,
                 Font = new Font("Consolas", 9F),
                 Dock = DockStyle.Fill,
                 BorderStyle = BorderStyle.None
@@ -132,7 +132,7 @@ namespace Ncl.Forms
             left.Controls.Add(logCard, 0, 2);
 
             /* ---- 右侧启动区 ---- */
-            var right = new Panel { Dock = DockStyle.Right, Width = 300, BackColor = Theme.Bg, Padding = new Padding(10, 14, 14, 14) };
+            var right = new CardPanel { Dock = DockStyle.Right, Width = 300, BackColor = Theme.Card, Padding = new Padding(14, 16, 14, 14) };
 
             _btnLaunch = Ui.MakeButton("开始游戏", true, 260);
             _btnLaunch.Height = 46;
@@ -147,12 +147,10 @@ namespace Ncl.Forms
             _launchHint.Width = 260;
             right.Controls.Add(_launchHint);
 
-            _launchBar = new ProgressBar
+            _launchBar = new RoundProgressBar
             {
-                Style = ProgressBarStyle.Continuous,
                 Location = new Point(10, 90),
                 Width = 260,
-                Height = 8,
                 Visible = false
             };
             right.Controls.Add(_launchBar);

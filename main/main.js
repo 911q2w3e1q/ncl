@@ -16,15 +16,26 @@ const { Readable } = require('stream');
 const AdmZip = require('adm-zip');
 const aiAnalyzer = require('./ai-analyzer');
 const aiFixer = require('./ai-fixer');
+const aiModels = require('./ai-models');
+const aiLocal = require('./ai-local');
+const aiServer = require('./ai-server');
 
 const LAUNCHER_NAME = 'NCL';
-const LAUNCHER_VERSION = '1.5.0';
+const LAUNCHER_VERSION = '1.6.0';
 const MANIFEST_URL = 'https://piston-meta.mojang.com/mc/game/version_manifest_v2.json';
 const JAVA_MANIFEST_URL = 'https://launchermeta.mojang.com/v1/products/java-runtime/2ec0cc96c44e5a76b9c8b7c39df7210883d12871/all.json';
 const GITHUB_REPO = '911q2w3e1q/ncl';
 const FABRIC_META = 'https://meta.fabricmc.net/v2';
 const FABRIC_META_MIRROR = 'https://bmclapi2.bangbang93.com/fabric-meta/v2';
 const PATCH_NOTES_URL = 'https://launchercontent.mojang.com/javaPatchNotes.json';
+
+/* 自定义协议必须在 app ready 之前注册为特权 scheme，否则渲染层无法用 fetch 读取
+ * （Node 测试环境下没有 electron 模块，此时跳过注册） */
+if (protocol && typeof protocol.registerSchemesAsPrivileged === 'function') {
+  protocol.registerSchemesAsPrivileged([
+    { scheme: 'ncl-ai', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } },
+  ]);
+}
 
 /* ---------------- 路径 ----------------
  * GAME_ROOT：游戏数据（版本/库/资源/Java 运行时），默认放启动器旁边（便携，PCL 风格），可在设置更改
@@ -718,6 +729,46 @@ function rememberGameContext(versionId, gameDir) {
   };
 }
 
+/**
+ * 本地模型 HTTP 服务（懒启动）
+ * transformers.js 的 tokenizer 存在性探测只支持 http/https，
+ * 所以模型文件不能走 ncl-ai:// 自定义协议，必须有一个本地 HTTP 源。
+ */
+let aiServerInstance = null;
+async function ensureAiServer() {
+  if (aiServerInstance) return aiServerInstance;
+  aiServerInstance = await aiServer.startModelServer(paths().launcher);
+  return aiServerInstance;
+}
+
+/**
+ * 本地模型推理入口
+ * - 校验模型是否已下载
+ * - 交给隐藏推理窗口用 onnxruntime-web WASM 生成
+ */
+async function localRunner(cfg, messages, maxTokens) {
+  const modelId = cfg.localModelId;
+  const def = aiModels.getModelDef(modelId);
+  if (!def) throw new Error(`未知的本地模型：${modelId}`);
+  if (!aiModels.modelReady(paths().launcher, modelId)) {
+    throw new Error(`本地模型「${def.label}」尚未下载完成，请先在设置里下载`);
+  }
+  const srv = await ensureAiServer();
+  const res = await aiLocal.requestGeneration({
+    messages,
+    modelId,
+    repo: def.repo,
+    maxTokens: maxTokens || 512,
+    temperature: cfg.temperature,
+    protocolName: 'ncl-ai',
+    baseUrl: srv.baseUrl,
+    getWin: () => win,
+  }, (p) => {
+    if (win) win.webContents.send('launcher://ai-local-progress', { modelId, stage: p.stage || 'load', percent: p.percent || 0 });
+  });
+  return res.text || '';
+}
+
 /** 触发一次崩溃分析（自动或手动），结果通过事件抛给渲染层 */
 async function runCrashAnalysis(trigger, extra) {
   const cfg = getAiConfig();
@@ -731,7 +782,7 @@ async function runCrashAnalysis(trigger, extra) {
     logTail: lastGameLog,
     exitCode: extra && extra.exitCode,
     signal: extra && extra.signal,
-  });
+  }, localRunner);
   if (win) {
     win.webContents.send('launcher://ai-analysis', {
       trigger: trigger || 'manual',
@@ -1068,11 +1119,17 @@ async function fetchFirstJSON(paths_) {
   }
   throw lastErr || new Error('所有源均请求失败');
 }
-async function installFabric(mcVersion, onProgress) {
+async function installFabric(mcVersion, onProgress, wantVersion = '') {
   const enc = encodeURIComponent(mcVersion);
   const loaders = await fetchFirstJSON([`${FABRIC_META}/versions/loader/${enc}`, `${FABRIC_META_MIRROR}/versions/loader/${enc}`]);
   if (!loaders.length) throw new Error(`Fabric 不支持 ${mcVersion}`);
-  const loader = loaders[0].loader.version;
+  // 指定版本优先；否则取最新
+  let loader = String(wantVersion || '').trim();
+  if (!loader) {
+    const all = loaders.map((x) => x.loader && x.loader.version).filter(Boolean);
+    loader = sortVersionsDesc(all)[0];
+  }
+  if (!loader) throw new Error(`Fabric 不支持 ${mcVersion}`);
   const profile = await fetchFirstJSON([
     `${FABRIC_META}/versions/loader/${enc}/${encodeURIComponent(loader)}/profile/json`,
     `${FABRIC_META_MIRROR}/versions/loader/${enc}/${encodeURIComponent(loader)}/profile/json`,
@@ -1287,6 +1344,33 @@ function safeMemoryMB(want) {
   return mb;
 }
 
+/* ---------------- 游戏本地化：默认中文 + 跳过辅助功能引导 ---------------- */
+
+/** 在游戏目录写入/修补 options.txt
+ *  - language:zh_cn          → 游戏界面默认简体中文（否则跟随系统变英文）
+ *  - onboardAccessibility:false → 跳过 1.19.4+ 首次启动的「辅助功能引导」屏
+ *  保留玩家已有的其它设置，只改这两行。
+ */
+function ensureOptionsTxt(gameDir) {
+  const file = path.join(gameDir, 'options.txt');
+  let text = '';
+  try { if (fs.existsSync(file)) text = fs.readFileSync(file, 'utf8'); } catch { text = ''; }
+  const lines = text.split(/\r?\n/);
+  const setKey = (key, value) => {
+    const re = new RegExp(`^${key}:`);
+    for (let i = 0; i < lines.length; i++) {
+      if (re.test(lines[i])) { lines[i] = `${key}:${value}`; return; }
+    }
+    lines.push(`${key}:${value}`);
+  };
+  setKey('language', 'zh_cn');
+  setKey('onboardAccessibility', 'false');
+  try {
+    ensureDir(gameDir);
+    fs.writeFileSync(file, lines.join('\n'), 'utf8');
+  } catch { /* 只读目录等情况忽略，不影响启动 */ }
+}
+
 function buildLaunchCommand(versionId, account, settings) {
   const P = paths();
   const vjson = readLocalVersionJSON(versionId);
@@ -1383,6 +1467,8 @@ function buildLaunchCommand(versionId, account, settings) {
   } else if (vjson.minecraftArguments) {
     for (const a of subst(vjson.minecraftArguments).split(/\s+/)) gameArgs.push(a);
   }
+  // 强制中文界面（不依赖系统语言）
+  if (!gameArgs.includes('--lang')) gameArgs.push('--lang', 'zh_cn');
 
   return {
     javaPath: vs.javaPath || null, // 由调用方补充 ensureJava 结果
@@ -1416,6 +1502,8 @@ async function launchGame(versionId, onLog) {
     }
     const cmd = buildLaunchCommand(versionId, account, settings);
     const vs = versionSettings(settings, versionId);
+    // 默认中文 + 跳过辅助功能引导屏
+    ensureOptionsTxt(cmd.gameDir);
     // 记住本次运行上下文 + 累积日志，崩溃时供 AI 分析
     rememberGameContext(versionId, cmd.gameDir);
     lastGameLog = '';
@@ -2121,9 +2209,11 @@ function registerIPC() {
     }
   });
 
-  ipcMain.handle('versions:installFabric', async (_, mcVersion) => {
+  ipcMain.handle('versions:installFabric', async (_, payload) => {
+    const mcVersion = typeof payload === 'string' ? payload : (payload && payload.mc);
+    const wantVersion = typeof payload === 'string' ? '' : ((payload && payload.version) || '');
     try {
-      const result = await installFabric(mcVersion, (p) => { if (win) win.webContents.send('launcher://progress', p); });
+      const result = await installFabric(mcVersion, (p) => { if (win) win.webContents.send('launcher://progress', p); }, wantVersion);
       return { ok: true, result };
     } catch (e) {
       if (win) win.webContents.send('launcher://progress', { stage: 'error', message: e.message, percent: 0, speed: 0 });
@@ -2136,6 +2226,28 @@ function registerIPC() {
     try {
       const manifest = await getManifest(false);
       return { ok: true, catalog: await loaderCatalog(manifest.versions) };
+    } catch (e) { return { ok: false, error: e.message }; }
+  });
+
+  /* 指定 MC 版本的全部加载器版本列表（下载页选加载器时用） */
+  ipcMain.handle('versions:loaderVersions', async (_, payload) => {
+    const { loader, mc } = payload || {};
+    try {
+      let versions = [];
+      if (loader === 'fabric') {
+        const enc = encodeURIComponent(mc);
+        const d = await fetchFirstJSON([`${FABRIC_META}/versions/loader/${enc}`, `${FABRIC_META_MIRROR}/versions/loader/${enc}`]);
+        versions = (Array.isArray(d) ? d : []).map((x) => String(x.loader || x.version || '')).filter(Boolean);
+      } else if (loader === 'forge') {
+        versions = await listForgeVersions(mc);
+      } else if (loader === 'neoforge') {
+        versions = neoforgeForMC(mc, await listNeoForgeAll());
+      } else if (loader === 'quilt') {
+        versions = await listQuiltVersions(mc);
+      } else {
+        return { ok: false, error: `未知的模组加载器：${loader}` };
+      }
+      return { ok: true, versions: sortVersionsDesc(versions) };
     } catch (e) { return { ok: false, error: e.message }; }
   });
 
@@ -2206,6 +2318,10 @@ function registerIPC() {
   ipcMain.handle('game:stop', () => ({ ok: stopGame() }));
 
   /* ---------- AI 报错分析 ---------- */
+  /* 本地推理窗口的回执与进度 */
+  ipcMain.on('ai:local-response', (_e, payload) => aiLocal.onWorkerResponse(payload));
+  ipcMain.on('ai:local-progress', (_e, payload) => aiLocal.onWorkerProgress(payload));
+
   ipcMain.handle('ai:getConfig', () => {
     const cfg = getAiConfig();
     // 回传时把 API Key 掩码，渲染层展示用
@@ -2229,7 +2345,54 @@ function registerIPC() {
 
   ipcMain.handle('ai:test', async () => {
     try {
-      return await aiAnalyzer.testConnection(getAiConfig());
+      return await aiAnalyzer.testConnection(getAiConfig(), localRunner);
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  });
+
+  /* ---------- 本地 AI 模型 ---------- */
+  ipcMain.handle('ai:localModels', () => {
+    try {
+      const list = aiModels.listModels(paths().launcher);
+      const cur = getAiConfig();
+      return {
+        ok: true,
+        models: list,
+        current: cur.localModelId || '',
+        mode: cur.mode || 'cloud',
+        root: aiModels.modelsRoot(paths().launcher),
+      };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('ai:localDownload', async (_, payload) => {
+    const modelId = (payload && payload.modelId) || '';
+    try {
+      const res = await aiModels.downloadModel(paths().launcher, modelId, (p) => {
+        if (win) win.webContents.send('launcher://ai-local-progress', { modelId, ...p });
+      });
+      return { ok: true, ...res };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('ai:localRemove', (_, payload) => {
+    try {
+      const res = aiModels.removeModel(paths().launcher, (payload && payload.modelId) || '');
+      return res;
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('ai:localReady', (_, payload) => {
+    try {
+      const modelId = (payload && payload.modelId) || '';
+      return { ok: true, ready: aiModels.modelReady(paths().launcher, modelId) };
     } catch (e) {
       return { ok: false, error: e.message };
     }
@@ -2452,6 +2615,37 @@ if (process.env.CUBE_TEST_MODE !== '1') {
       if (!name || !exists(file)) return new Response('Not Found', { status: 404 });
       return net.fetch('file://' + file.replace(/\\/g, '/'));
     });
+    /* 本地 AI 协议：ncl-ai://
+     *   model/<repo>/<文件> →<launcher>/ai-models/<repo>/<文件>（本地模型）
+     *   ort/<文件名>            → 打包进资源的 onnxruntime wasm
+     *   app/<文件名>            → renderer/ 下的运行时脚本
+     */
+    protocol.handle('ncl-ai', (req) => {
+      let pathname = '';
+      let host = '';
+      try {
+        const u = new URL(req.url);
+        host = u.hostname;
+        pathname = decodeURIComponent(u.pathname).replace(/^\/+/, '');
+      } catch { return new Response('Bad Request', { status: 400 }); }
+      const segs = pathname.split('/').filter(Boolean);
+      let file = '';
+      if (host === 'model') {
+        // 路径形如 model/<owner>/<name>/<相对文件>
+        const rel = segs.slice(2).join('/');
+        const repo = segs.slice(0, 2).join('/');
+        if (!repo || !rel) return new Response('Not Found', { status: 404 });
+        file = path.join(aiModels.modelDir(paths().launcher, repo), ...rel.split('/'));
+      } else if (host === 'ort') {
+        file = path.join(require('./ai-server').aiRuntimeDir(), 'ort', segs[0] || '');
+      } else if (host === 'app') {
+        file = path.join(require('./ai-server').aiRuntimeDir(), ...segs);
+      } else {
+        return new Response('Not Found', { status: 404 });
+      }
+      if (!file || !exists(file)) return new Response('Not Found', { status: 404 });
+      return net.fetch('file://' + file.replace(/\\/g, '/'));
+    });
     registerIPC();
     createWindow();
     app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
@@ -2467,7 +2661,11 @@ if (process.env.CUBE_TEST_MODE !== '1') {
   });
 
   app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
-  app.on('before-quit', () => { stopGame(); });
+  app.on('before-quit', () => {
+    stopGame();
+    try { aiLocal.disposeWorker(); } catch { /* 忽略 */ }
+    try { if (aiServerInstance) aiServerInstance.close(); } catch { /* 忽略 */ }
+  });
 }
 
 /* 供 Node 测试脚本复用（非 Electron 环境下不会执行到这里） */

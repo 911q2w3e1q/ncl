@@ -19,6 +19,7 @@ namespace Ncl.Forms
         {
             BackColor = Theme.Bg;
             Build();
+            Theme.Apply(this);
         }
 
         private void Build()

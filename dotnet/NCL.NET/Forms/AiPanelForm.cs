@@ -104,6 +104,8 @@ namespace Ncl.Forms
                 BackColor = Theme.Bg
             };
             Controls.Add(_solutions);
+            Theme.Apply(this);
+            Shown += (s, e) => Theme.Apply(this);
         }
 
         private async Task Analyze(string trigger)

@@ -11,13 +11,14 @@ const INVOKE_CHANNELS = new Set([
   'theme:pickBackground', 'theme:resetBackground',
   'game:launch', 'game:stop',
   'ai:getConfig', 'ai:setConfig', 'ai:test', 'ai:analyze', 'ai:applyActions', 'ai:rollback',
+  'ai:localModels', 'ai:localDownload', 'ai:localRemove', 'ai:localReady',
   'download:search', 'download:detail', 'download:install', 'content:importFile', 'content:importPath',
   'wiki:versionInfo', 'wiki:patchNotes',
   'updater:check', 'updater:download', 'updater:apply',
   'shell:openPath', 'shell:openExternal',
   'window:minimize', 'window:maximize', 'window:close',
 ]);
-const EVENT_CHANNELS = new Set(['launcher://progress', 'launcher://game-log', 'launcher://game-exit', 'launcher://dl-progress', 'launcher://ms-code', 'launcher://up-progress', 'launcher://up-available', 'launcher://ai-analysis', 'launcher://game-crashed']);
+const EVENT_CHANNELS = new Set(['launcher://progress', 'launcher://game-log', 'launcher://game-exit', 'launcher://dl-progress', 'launcher://ms-code', 'launcher://up-progress', 'launcher://up-available', 'launcher://ai-analysis', 'launcher://game-crashed', 'launcher://ai-local-progress']);
 
 contextBridge.exposeInMainWorld('cube', {
   invoke(channel, ...args) {

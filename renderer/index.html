@@ -365,27 +365,44 @@
             </div>
 
             <div class="set-card">
+              <div class="set-info"><div class="set-name">AI 模式</div><div class="set-desc">「本地模型」使用启动器内置的小模型分析，完全离线、无需 API Key；「云端接口」使用你自己的 Key，质量更好</div></div>
+              <div class="set-ctrl set-ctrl-wide">
+                <div class="seg" id="sp-ai-mode">
+                  <button class="seg-item" data-mode="cloud">云端接口</button>
+                  <button class="seg-item" data-mode="local">本地模型</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="set-card" id="sp-ai-cloud-box">
               <div class="set-info"><div class="set-name">崩溃时自动分析</div><div class="set-desc">游戏异常退出后自动弹出分析结果；关闭后需在运行日志里手动点「分析报错」</div></div>
               <div class="set-ctrl">
                 <label class="set-toggle"><input type="checkbox" id="sp-ai-auto" checked /><span class="set-toggle-slider"></span></label>
               </div>
             </div>
 
-            <div class="set-card">
+            <div class="set-card" id="sp-ai-local-box" hidden>
+              <div class="set-info"><div class="set-name">本地模型</div><div class="set-desc">选一个内置小模型并下载到本地，之后分析完全离线运行，不消耗任何额度。内置的规则引擎会先给出确定性的崩溃结论，小模型输出作为补充意见</div></div>
+              <div class="set-ctrl set-ctrl-wide">
+                <div class="ai-model-list" id="sp-ai-model-list"></div>
+              </div>
+            </div>
+
+            <div class="set-card" id="sp-ai-baseurl-card">
               <div class="set-info"><div class="set-name">API 地址</div><div class="set-desc">兼容任何 OpenAI 格式接口，如 https://api.openai.com/v1、https://api.deepseek.com/v1、https://open.bigmodel.cn/api/paas/v4</div></div>
               <div class="set-ctrl set-ctrl-wide">
                 <input type="text" id="sp-ai-baseurl" placeholder="https://api.openai.com/v1" />
               </div>
             </div>
 
-            <div class="set-card">
+            <div class="set-card" id="sp-ai-apikey-card">
               <div class="set-info"><div class="set-name">API Key</div><div class="set-desc">只保存在本机设置文件，不会上传到任何第三方</div></div>
               <div class="set-ctrl set-ctrl-wide">
                 <input type="password" id="sp-ai-apikey" placeholder="sk-…" />
               </div>
             </div>
 
-            <div class="set-card">
+            <div class="set-card" id="sp-ai-model-card">
               <div class="set-info"><div class="set-name">模型</div><div class="set-desc">模型名称，如 gpt-4o-mini、deepseek-chat、glm-4-flash</div></div>
               <div class="set-ctrl set-ctrl-wide">
                 <input type="text" id="sp-ai-model" placeholder="gpt-4o-mini" />
@@ -523,6 +540,28 @@
       <div class="modal-foot">
         <span class="mf-hint" id="ver-modal-hint">点击版本即可选择；未安装的版本点「安装」</span>
         <button class="btn-ghost" data-close="modal-version">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 加载器选择弹窗（下载页点原版版本时弹出：先选加载器，再选加载器版本） -->
+  <div class="modal-mask" id="modal-loader" hidden>
+    <div class="modal">
+      <div class="modal-head">
+        <h3 id="dl-loader-title">选择模组加载器</h3>
+        <button class="modal-close" data-close="modal-loader">✕</button>
+      </div>
+      <div class="modal-tabs" id="dl-loader-tabs">
+        <button class="mtab active" data-loader="fabric">Fabric</button>
+        <button class="mtab" data-loader="forge">Forge</button>
+        <button class="mtab" data-loader="neoforge">NeoForge</button>
+        <button class="mtab" data-loader="quilt">Quilt</button>
+        <input type="search" id="dl-loader-search" placeholder="搜索加载器版本…" />
+      </div>
+      <div class="modal-body" id="dl-loader-list"><div class="dl-empty">加载中…</div></div>
+      <div class="modal-foot">
+        <span class="mf-hint" id="dl-loader-hint">先选加载器，再选具体版本安装</span>
+        <button class="btn-ghost" data-close="modal-loader">关闭</button>
       </div>
     </div>
   </div>

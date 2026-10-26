@@ -25,7 +25,7 @@ namespace Ncl.Forms
             BackColor = Theme.Bg;
             Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
 
-            _navBar = new Panel { Dock = DockStyle.Top, Height = 46, BackColor = Theme.BgAlt };
+            _navBar = new GradientBar { Dock = DockStyle.Top, Height = 52 };
             _content = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg };
             Controls.Add(_content);
             Controls.Add(_navBar);
@@ -38,44 +38,46 @@ namespace Ncl.Forms
             _settingsPage = new SettingsPage();
 
             ShowPage(0);
+            Theme.Apply(this);
+            Shown += (s, e) => Theme.Apply(this);
         }
 
         private void BuildNav()
         {
-            var brand = Ui.MakeLabel("NCL", 15, true, Theme.Accent);
-            brand.Location = new Point(18, 12);
+            var brand = Ui.MakeLabel("NCL", 16, true, Color.White);
+            brand.Location = new Point(18, 14);
             _navBar.Controls.Add(brand);
 
             string[] names = { "游戏", "下载中心", "Wiki", "设置" };
             _navButtons = new Button[names.Length];
-            int x = 90;
+            int x = 92;
             for (int i = 0; i < names.Length; i++)
             {
                 var b = new Button
                 {
                     Text = names[i],
                     FlatStyle = FlatStyle.Flat,
-                    BackColor = Theme.BgAlt,
-                    ForeColor = Theme.TextDim,
+                    BackColor = Color.Transparent,
+                    ForeColor = Color.White,
                     Font = new Font("Microsoft YaHei UI", 9.5F),
-                    Width = 84,
-                    Height = 46,
+                    Width = 88,
+                    Height = 52,
                     Cursor = Cursors.Hand,
                     UseVisualStyleBackColor = false,
                     TextAlign = ContentAlignment.MiddleCenter
                 };
                 b.FlatAppearance.BorderSize = 0;
-                b.FlatAppearance.MouseOverBackColor = Theme.CardHover;
+                b.FlatAppearance.MouseOverBackColor = Color.FromArgb(40, 255, 255, 255);
                 b.Location = new Point(x, 0);
                 int idx = i;
                 b.Click += (s, e) => ShowPage(idx);
                 _navBar.Controls.Add(b);
                 _navButtons[i] = b;
-                x += 84;
+                x += 88;
             }
 
-            var ver = Ui.MakeLabel("v" + Core.Consts.LauncherVersion, 9, false, Theme.TextDim);
-            ver.Location = new Point(x + 14, 15);
+            var ver = Ui.MakeLabel("v" + Core.Consts.LauncherVersion, 9, false, Color.FromArgb(255, 235, 245));
+            ver.Location = new Point(x + 14, 18);
             _navBar.Controls.Add(ver);
         }
 
@@ -93,8 +95,8 @@ namespace Ncl.Forms
             for (int i = 0; i < _navButtons.Length; i++)
             {
                 bool active = i == index;
-                _navButtons[i].BackColor = active ? Theme.Card : Theme.BgAlt;
-                _navButtons[i].ForeColor = active ? Theme.Accent : Theme.TextDim;
+                _navButtons[i].BackColor = active ? Color.FromArgb(255, 255, 255, 245) : Color.Transparent;
+                _navButtons[i].ForeColor = active ? Theme.Accent : Color.White;
             }
         }
 

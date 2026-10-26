@@ -190,10 +190,44 @@ namespace Ncl.Core
                 foreach (var a in Regex.Split(Substitute((string)vjson["minecraftArguments"], vars), @"\s+"))
                     if (a.Length > 0) cmd.GameArgs.Add(a);
             }
+            // 强制中文界面（不依赖系统语言）
+            if (!cmd.GameArgs.Contains("--lang"))
+            {
+                cmd.GameArgs.Add("--lang");
+                cmd.GameArgs.Add("zh_cn");
+            }
 
             cmd.MainClass = (string)vjson["mainClass"];
             cmd.JavaPath = vs.JavaPath;
             return cmd;
+        }
+
+        /// <summary>在游戏目录写入/修补 options.txt
+        ///  - language:zh_cn            → 游戏界面默认简体中文
+        ///  - onboardAccessibility:false → 跳过 1.19.4+ 首次启动的「辅助功能引导」屏
+        /// 保留玩家已有其它设置，只改这两行。
+        /// </summary>
+        public static void EnsureOptionsTxt(string gameDir)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(gameDir)) return;
+                Directory.CreateDirectory(gameDir);
+                string file = Path.Combine(gameDir, "options.txt");
+                string text = "";
+                try { if (File.Exists(file)) text = File.ReadAllText(file); } catch { }
+                var lines = new List<string>(text.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None));
+                Action<string, string> setKey = (key, val) =>
+                {
+                    for (int i = 0; i < lines.Count; i++)
+                        if (lines[i].StartsWith(key + ":")) { lines[i] = key + ":" + val; return; }
+                    lines.Add(key + ":" + val);
+                };
+                setKey("language", "zh_cn");
+                setKey("onboardAccessibility", "false");
+                File.WriteAllLines(file, lines);
+            }
+            catch { /* 只读目录等情况忽略，不影响启动 */ }
         }
 
         private static Process _gameProc;
@@ -236,6 +270,8 @@ namespace Ncl.Core
 
                 var cmd = BuildLaunchCommand(versionId, account, settings);
                 var vs = settings.Effective(versionId);
+                // 默认中文 + 跳过辅助功能引导屏
+                EnsureOptionsTxt(cmd.GameDir);
                 LastGameContext = new GameContext { VersionId = versionId, GameDir = cmd.GameDir, Settings = settings };
                 LastGameLog = "";
 

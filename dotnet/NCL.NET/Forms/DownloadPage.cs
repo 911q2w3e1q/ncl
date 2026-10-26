@@ -30,6 +30,7 @@ namespace Ncl.Forms
             BackColor = Theme.Bg;
             Build();
             _ = Search();
+            Theme.Apply(this);
         }
 
         private void Build()

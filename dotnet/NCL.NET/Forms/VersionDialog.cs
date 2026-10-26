@@ -96,6 +96,8 @@ namespace Ncl.Forms
             LoadInstalled();
             _ = LoadVanilla();
             _ = LoadMcList();
+            Theme.Apply(this);
+            Shown += (s, e) => Theme.Apply(this);
         }
 
         /* ---------------- 页签构建 ---------------- */

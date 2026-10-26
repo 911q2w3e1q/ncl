@@ -311,6 +311,28 @@ t('主进程：analyzeCrash 无 Key 时返回可读错误', async () => {
   assert.ok(r.error.includes('API Key'));
 });
 
+t('主进程：本地模式免 Key，规则引擎给出准确结论', async () => {
+  const r = await analyzer.analyzeCrash(
+    { mode: 'local', localModelId: 'smollm2-135m', enabled: true },
+    {
+      gameDir: os.tmpdir(),
+      logTail: ['java.lang.OutOfMemoryError: Java heap space'],
+      exitCode: 1,
+    },
+    async () => '原因：内存不够\n建议：\n1. 加大内存',
+  );
+  assert.strictEqual(r.ok, true);
+  assert.ok(r.analysis.summary.includes('内存不足'), 'summary 应命中 OOM 规则');
+  assert.ok(r.analysis.causes.some((c) => c.title.includes('内存不足')));
+  assert.ok(r.analysis.solutions.length > 0, '应给出修复方案');
+});
+
+t('主进程：本地模式未选模型时返回可读错误', async () => {
+  const r = await analyzer.analyzeCrash({ mode: 'local', localModelId: '' }, { gameDir: os.tmpdir() }, async () => 'x');
+  assert.strictEqual(r.ok, false);
+  assert.ok(r.error.includes('本地模型'));
+});
+
 t('主进程：aiAnalyzer / aiFixer 已导出', () => {
   assert.strictEqual(typeof M.aiAnalyzer.analyzeCrash, 'function');
   assert.strictEqual(typeof M.aiFixer.applyActions, 'function');

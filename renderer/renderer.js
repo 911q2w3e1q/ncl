@@ -1199,7 +1199,11 @@ async function dlLoadList() {
       dl.hoverTimer = setTimeout(() => dlShowDetail(item), 120);
     });
     row.addEventListener('mouseleave', () => clearTimeout(dl.hoverTimer));
-    row.addEventListener('click', () => dlShowDetail(item));
+    row.addEventListener('click', () => {
+      // 原版游戏：点一下直接进入「选加载器 → 选加载器版本」流程
+      if (dl.category === 'vanilla' && !item.installed) { openLoaderPicker(item.id); return; }
+      dlShowDetail(item);
+    });
     box.appendChild(row);
   }
 }
@@ -1260,7 +1264,8 @@ function dlRenderDetail() {
         `<span class="vnum">${esc(v.number || v.name)}</span><span class="vdate">${fmtDate(v.date)}</span></div>`).join('') + `</div>` : '') +
     `<div class="dd-actions">` +
     (isVanilla
-      ? `<button class="btn" id="dd-install" ${installed ? 'disabled' : ''}>${installed ? '已安装' : '安装该版本'}</button>`
+      ? `<button class="btn" id="dd-install" ${installed ? 'disabled' : ''}>${installed ? '已安装' : '安装该版本'}</button>` +
+        (installed ? '' : `<button class="btn-ghost btn-sm" id="dd-install-loader">用加载器安装</button>`)
       : `<button class="btn" id="dd-install">安装${dl.selectedVersionId ? '所选版本' : ''}</button>`) +
     `</div>` +
     (d.url ? `<div class="dd-open"><a href="#" id="dd-open-url">在 Modrinth 上查看 ↗</a></div>` : '');
@@ -1272,8 +1277,87 @@ function dlRenderDetail() {
   }));
   const installBtn = $('dd-install');
   if (installBtn) installBtn.onclick = () => dlInstall();
+  const loaderBtn = $('dd-install-loader');
+  if (loaderBtn) loaderBtn.onclick = () => openLoaderPicker(d.id);
   const openUrl = $('dd-open-url');
   if (openUrl) openUrl.onclick = (e) => { e.preventDefault(); api('shell:openExternal', d.url); };
+}
+
+/* ---------- 加载器选择（下载页：点一下选加载器 → 选加载器版本 → 安装） ---------- */
+const dlLoader = { mc: '', loader: 'fabric', versions: [], search: '' };
+
+function openLoaderPicker(mcVersion) {
+  dlLoader.mc = mcVersion;
+  dlLoader.loader = 'fabric';
+  dlLoader.versions = [];
+  dlLoader.search = '';
+  $('dl-loader-title').textContent = `为 ${mcVersion} 选择模组加载器`;
+  $('dl-loader-search').value = '';
+  $('modal-loader').hidden = false;
+  document.querySelectorAll('#dl-loader-tabs .mtab').forEach((b) => b.classList.toggle('active', b.dataset.loader === 'fabric'));
+  dlLoaderRender();
+}
+
+async function dlLoaderRender() {
+  const box = $('dl-loader-list');
+  box.innerHTML = '<div class="dl-empty">加载中…</div>';
+  const r = await api('versions:loaderVersions', { loader: dlLoader.loader, mc: dlLoader.mc });
+  if (dlLoader.search) {
+    // 重新拉一次带搜索的结果
+  }
+  if (!r || !r.ok) {
+    box.innerHTML = `<div class="dl-empty">${esc((r && r.error) || '获取加载器版本失败')}</div>`;
+    return;
+  }
+  dlLoader.versions = r.versions || [];
+  const list = dlLoader.search
+    ? dlLoader.versions.filter((v) => String(v).includes(dlLoader.search))
+    : dlLoader.versions;
+  if (!list.length) {
+    box.innerHTML = '<div class="dl-empty">该游戏版本暂无可用的加载器版本</div>';
+    return;
+  }
+  box.innerHTML = '';
+  for (const v of list) {
+    const row = document.createElement('div');
+    row.className = 'ver-row';
+    row.innerHTML = `<span class="vname">${esc(v)}</span>` +
+      `<span class="vtype ${dlLoader.loader}">${LOADER_LABELS[dlLoader.loader]}</span>` +
+      `<span class="vmeta">${esc(dlLoader.mc)}</span>`;
+    const btn = document.createElement('button');
+    btn.className = 'btn';
+    btn.textContent = '安装';
+    btn.onclick = async () => {
+      btn.disabled = true;
+      btn.textContent = '安装中…';
+      const r2 = dlLoader.loader === 'fabric'
+        ? await api('versions:installFabric', { mc: dlLoader.mc, version: v })
+        : await api('versions:installLoader', { loader: dlLoader.loader, mc: dlLoader.mc, version: v });
+      if (r2 && r2.ok) {
+        toast(`${dlLoader.mc} ${LOADER_LABELS[dlLoader.loader]} ${v} 安装完成`, true);
+        $('modal-loader').hidden = true;
+        await refresh();
+      } else {
+        toast((r2 && r2.error) || '安装失败', false);
+        btn.disabled = false;
+        btn.textContent = '安装';
+      }
+    };
+    row.appendChild(btn);
+    box.appendChild(row);
+  }
+}
+
+function dlLoaderInit() {
+  document.querySelectorAll('#dl-loader-tabs .mtab').forEach((b) => {
+    b.onclick = () => {
+      dlLoader.loader = b.dataset.loader;
+      document.querySelectorAll('#dl-loader-tabs .mtab').forEach((x) => x.classList.toggle('active', x === b));
+      dlLoaderRender();
+    };
+  });
+  const s = $('dl-loader-search');
+  if (s) s.oninput = () => { dlLoader.search = s.value.trim(); dlLoaderRender(); };
 }
 
 /* ---------- 安装 ---------- */
@@ -1678,6 +1762,7 @@ bindUpdateModal();
 if (typeof bindAiPanel === 'function') bindAiPanel();
 initDragDrop();
 bindDropTypeModal();
+dlLoaderInit();
 bindWikiPage();
 refresh();
 if (typeof aiLoadConfig === 'function') aiLoadConfig();

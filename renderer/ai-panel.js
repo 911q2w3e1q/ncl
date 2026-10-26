@@ -177,16 +177,182 @@ async function aiApplySolution(actions, btn) {
 
 /* ---------------- 设置页 AI 配置 ---------------- */
 
+/** 当前 AI 模式（cloud / local） */
+let aiMode = 'cloud';
+/** 本地模型列表缓存 */
+let aiLocalModels = [];
+/** 正在下载的模型 id */
+let aiDownloading = '';
+
+/** 格式化字节数 */
+function aiFmtSize(n) {
+  const v = Number(n) || 0;
+  if (v >= 1024 * 1024 * 1024) return `${(v / 1024 / 1024 / 1024).toFixed(2)} GB`;
+  if (v >= 1024 * 1024) return `${Math.round(v / 1024 / 1024)} MB`;
+  if (v >= 1024) return `${Math.round(v / 1024)} KB`;
+  return `${v} B`;
+}
+
+/** 切换设置页的显示（云端 / 本地） */
+function aiApplyModeUI() {
+  const local = aiMode === 'local';
+  const box = $('sp-ai-local-box');
+  const base = $('sp-ai-baseurl-card');
+  const key = $('sp-ai-apikey-card');
+  const model = $('sp-ai-model-card');
+  const cloud = $('sp-ai-cloud-box');
+  if (box) box.hidden = !local;
+  if (cloud) cloud.hidden = local;
+  if (base) base.hidden = local;
+  if (key) key.hidden = local;
+  if (model) model.hidden = local;
+  // 模式分段按钮高亮
+  const seg = $('sp-ai-mode');
+  if (seg) {
+    for (const b of seg.querySelectorAll('.seg-item')) {
+      b.classList.toggle('seg-active', b.dataset.mode === aiMode);
+    }
+  }
+  const auto = $('sp-ai-auto');
+  const autoCard = auto && auto.closest ? auto.closest('.set-card') : null;
+  if (autoCard) autoCard.hidden = false;
+}
+
+/** 渲染本地模型列表 */
+function aiRenderLocalModels() {
+  const wrap = $('sp-ai-model-list');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  if (!aiLocalModels.length) {
+    const d = document.createElement('div');
+    d.className = 'ai-model-empty';
+    d.textContent = '正在读取模型列表…';
+    wrap.appendChild(d);
+    return;
+  }
+  for (const m of aiLocalModels) {
+    const row = document.createElement('div');
+    row.className = 'ai-model-row' + (m.id === aiLocalCurrentId ? ' ai-model-active' : '');
+
+    const info = document.createElement('div');
+    info.className = 'ai-model-info';
+    const name = document.createElement('div');
+    name.className = 'ai-model-name';
+    name.textContent = m.label;
+    const meta = document.createElement('div');
+    meta.className = 'ai-model-meta';
+    meta.textContent = `${m.params} · ${aiFmtSize(m.size)}`;
+    const note = document.createElement('div');
+    note.className = 'ai-model-note';
+    note.textContent = m.installed ? '已下载到本地' : m.note;
+    info.append(name, meta, note);
+
+    const act = document.createElement('div');
+    act.className = 'ai-model-act';
+    if (m.installed) {
+      const use = document.createElement('button');
+      use.className = 'btn-ghost btn-sm' + (m.id === aiLocalCurrentId ? ' ai-btn-picked' : '');
+      use.textContent = m.id === aiLocalCurrentId ? '已选用' : '选用';
+      use.onclick = async () => {
+        aiLocalCurrentId = m.id;
+        await aiSaveConfig(true);
+        await aiLoadLocalModels();
+        toast(`已选用本地模型：${m.label}`);
+      };
+      const del = document.createElement('button');
+      del.className = 'btn-ghost btn-sm ai-btn-danger';
+      del.textContent = '删除';
+      del.onclick = async () => {
+        if (!confirm(`确定删除本地模型「${m.label}」？`)) return;
+        const r = await api('ai:localRemove', { modelId: m.id });
+        if (r && r.ok) {
+          toast('已删除本地模型');
+          await aiLoadLocalModels();
+        } else {
+          toast('删除失败：' + ((r && r.error) || '未知原因'));
+        }
+      };
+      act.append(use, del);
+    } else if (aiDownloading === m.id) {
+      const bar = document.createElement('div');
+      bar.className = 'ai-model-progress';
+      const fill = document.createElement('div');
+      fill.className = 'ai-model-progress-fill';
+      fill.style.width = `${aiDownloadPercent}%`;
+      bar.appendChild(fill);
+      const txt = document.createElement('span');
+      txt.className = 'ai-model-progress-text';
+      txt.textContent = `下载中 ${aiDownloadPercent}%`;
+      act.append(bar, txt);
+    } else {
+      const dl = document.createElement('button');
+      dl.className = 'btn btn-sm';
+      dl.textContent = `下载（${aiFmtSize(m.size)}）`;
+      dl.onclick = () => aiDownloadLocalModel(m);
+      act.appendChild(dl);
+    }
+    row.append(info, act);
+    wrap.appendChild(row);
+  }
+}
+
+/** 下载本地模型 */
+let aiDownloadPercent = 0;
+async function aiDownloadLocalModel(m) {
+  if (aiDownloading) { toast('已有模型正在下载，请稍候'); return; }
+  aiDownloading = m.id;
+  aiDownloadPercent = 0;
+  aiRenderLocalModels();
+  try {
+    const r = await api('ai:localDownload', { modelId: m.id });
+    if (r && r.ok) {
+      toast(`模型「${m.label}」下载完成`);
+      aiLocalCurrentId = m.id;
+      await aiSaveConfig(true);
+    } else {
+      toast('下载失败：' + ((r && r.error) || '未知原因'));
+    }
+  } catch (e) {
+    toast('下载失败：' + (e.message || String(e)));
+  } finally {
+    aiDownloading = '';
+    aiDownloadPercent = 0;
+    await aiLoadLocalModels();
+  }
+}
+
+/** 拉取本地模型列表 */
+let aiLocalCurrentId = '';
+async function aiLoadLocalModels() {
+  try {
+    const r = await api('ai:localModels');
+    if (r && r.ok) {
+      aiLocalModels = r.models || [];
+      aiLocalCurrentId = r.current || aiLocalCurrentId;
+      if (aiMode === 'local') aiRenderLocalModels();
+    }
+  } catch { /* 忽略 */ }
+}
+
 async function aiLoadConfig() {
   try {
     const cfg = await api('ai:getConfig');
+    aiMode = (cfg && cfg.mode) === 'local' ? 'local' : 'cloud';
+    aiLocalCurrentId = (cfg && cfg.localModelId) || aiLocalCurrentId;
     $('sp-ai-enabled').checked = !!(cfg && cfg.enabled);
     $('sp-ai-auto').checked = !(cfg && cfg.autoAnalyze === false);
     $('sp-ai-baseurl').value = (cfg && cfg.baseUrl) || '';
     $('sp-ai-model').value = (cfg && cfg.model) || '';
     $('sp-ai-apikey').value = '';
     $('sp-ai-apikey').placeholder = (cfg && cfg.apiKeyMasked) ? `${cfg.apiKeyMasked}（留空表示不修改）` : 'sk-…';
-    $('sp-ai-test-result').textContent = (cfg && cfg.hasKey) ? '已配置' : '未配置 API Key';
+    const res = $('sp-ai-test-result');
+    if (res) {
+      res.textContent = aiMode === 'local'
+        ? '本地模式无需 API Key'
+        : ((cfg && cfg.hasKey) ? '已配置' : '未配置 API Key');
+    }
+    aiApplyModeUI();
+    await aiLoadLocalModels();
   } catch (e) {
     $('sp-ai-test-result').textContent = '读取失败：' + e.message;
   }
@@ -196,9 +362,11 @@ async function aiSaveConfig(silent) {
   const patch = {
     enabled: $('sp-ai-enabled').checked,
     autoAnalyze: $('sp-ai-auto').checked,
+    mode: aiMode,
     baseUrl: $('sp-ai-baseurl').value.trim(),
     model: $('sp-ai-model').value.trim(),
   };
+  if (aiMode === 'local') patch.localModelId = aiLocalCurrentId;
   const key = $('sp-ai-apikey').value.trim();
   if (key) patch.apiKey = key;
   try {
@@ -226,10 +394,10 @@ async function aiTestConnection() {
     const r = await api('ai:test');
     if (r && r.ok) {
       el.textContent = r.message || '连接成功';
-      toast('AI 接口连接成功');
+      toast(aiMode === 'local' ? '本地模型可用' : 'AI 接口连接成功');
     } else {
       el.textContent = '失败：' + ((r && r.error) || '未知原因');
-      toast('AI 接口连接失败');
+      toast(aiMode === 'local' ? '本地模型不可用' : 'AI 接口连接失败');
     }
   } catch (e) {
     el.textContent = '失败：' + e.message;
@@ -250,6 +418,33 @@ function bindAiPanel() {
   // 设置页
   $('sp-btn-ai-save').addEventListener('click', () => aiSaveConfig(false));
   $('sp-btn-ai-test').addEventListener('click', () => aiTestConnection());
+
+  // AI 模式切换（云端 / 本地）
+  const seg = $('sp-ai-mode');
+  if (seg) {
+    for (const b of seg.querySelectorAll('.seg-item')) {
+      b.addEventListener('click', async () => {
+        const mode = b.dataset.mode === 'local' ? 'local' : 'cloud';
+        if (mode === aiMode) return;
+        aiMode = mode;
+        aiApplyModeUI();
+        if (mode === 'local') {
+          aiRenderLocalModels();
+          await aiLoadLocalModels();
+          aiRenderLocalModels();
+        }
+        await aiSaveConfig(true);
+      });
+    }
+  }
+
+  // 本地模型下载进度
+  onEvent('launcher://ai-local-progress', (payload) => {
+    if (!payload || !payload.modelId) return;
+    if (payload.modelId !== aiDownloading) return;
+    if (typeof payload.percent === 'number') aiDownloadPercent = payload.percent;
+    if (aiMode === 'local') aiRenderLocalModels();
+  });
 
   // 崩溃自动事件（主进程触发）
   onEvent('launcher://ai-analysis', (payload) => {

@@ -147,6 +147,8 @@ namespace Ncl.Forms
 
             Controls.Add(tabs);
             LoadAccounts();
+            Theme.Apply(this);
+            Shown += (s, e) => Theme.Apply(this);
         }
 
         private void LoadAccounts()

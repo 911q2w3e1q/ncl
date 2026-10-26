@@ -1,7 +1,62 @@
-# NCL 开发交接文档（v1.5.0 已发布）
+# NCL 开发交接文档（v1.6.0 开发中）
 
-> 最后更新：2026-10-26 07:40（v1.5.0 Release 发布完成：新增 .NET 版 Windows 专用启动器）
+> 最后更新：2026-10-26（v1.6.0：网页内核 Windows 版重构 + 内置本地 AI）
 > 用途：会话上下文若被清理，新会话凭本文档 + 任务清单无缝接手。
+
+## 〇、v1.6.0 新增（网页内核 Windows 版 + 本地 AI）
+
+### 0.1 顶层 exe 与瘦身（tools/build-electron.js）
+
+**问题**：1.5.0 的 Windows 包顶层只有 52KB 的 `NCL.exe` 壳，195MB 的 `electron.exe` 被藏在 `engine/` 目录。
+
+**v1.6.0 做法**：
+- `tools/build-electron.js` 全新打包脚本：复制 Electron dist → 打包应用代码成 `resources/app.asar` → 把 `ai/` 拷到 `resources/ai/`（asar 之外）→ 瘦身 → `electron.exe` 改名 `NCL.exe` 留在顶层
+- **瘦身清单**（`KEEP_LOCALES` / `JUNK_FILES`）：只留 zh-CN/en-US 两个 pak（省 ~40MB）、删 `LICENSES.chromium.html`（15MB）、`dxcompiler.dll`/`dxil.dll`（25MB）、`vk_swiftshader*`（5MB）、`ffmpeg.dll`（3MB）、`libGLESv2.so`/`libEGL.so`
+- **依赖瘦身**：`@huggingface/transformers`（14MB）与 `onnxruntime-web`（141MB）改为 **devDependencies**——运行时代码已提前打成 `ai/ai-runtime.js`（1.2MB），不需要进包。生产依赖只剩 `adm-zip`
+- **跨平台构建**：`tools/dl-electron-parallel.sh` 多路 Range 并行下载 Electron 发行包（GitHub 直连单线程只有 ~30KB/s，8 路并发才可用）；产物放 `build/electron-dists/<platform>-<arch>/`，打包脚本优先读这里
+
+### 0.2 本地内置小模型 AI（免 API Key）
+
+**用户诉求**：「为什么 AI 报错分析还得填 ai key 呀？……本地 AI 也在启动器内内置了，选那种模型量小一点的」
+
+**架构**（主进程管文件 + 隐藏渲染进程跑推理）：
+
+| 文件 | 职责 |
+|---|---|
+| `main/ai-models.js` | 模型清单（SmolLM2-135M q4f16 = 118MB / Qwen2.5-0.5B q4f16 = 461MB）、下载（流式+进度）、就绪检查、删除 |
+| `main/ai-server.js` | **本地 HTTP 服务**（仅 127.0.0.1，随机端口）：`/model/<owner>/<name>/<file>`、`/ort/<file>`、`/app/<file>`；支持 Range（transformers.js 用 `bytes=0-0` 探测大小）；`aiRuntimeDir()` 区分开发态（`ai/`）与打包态（`resources/ai/`） |
+| `main/ai-local.js` | 隐藏 BrowserWindow 生命周期、请求 ID、超时（10 分钟）、进度转发 |
+| `main/ai-preload.js` | 推理窗口专用 preload，暴露 `localAI.onRequest/reply/progress` |
+| `main/ai-rules.js` | **崩溃规则引擎**（12 条确定性规则，见下） |
+| `ai/ai-worker.html` / `ai/ai-worker.js` | 推理页面与脚本 |
+| `ai/ai-runtime.js` | esbuild 产物（transformers.js 浏览器 ESM bundle，1.2MB） |
+| `ai/ort/ort-wasm-simd-threaded.wasm` | onnxruntime-web WASM 二进制（14MB） |
+
+**关键坑（三次踩坑才通）**：
+
+1. **Node 下 `device:'wasm'` 不支持** —— `transformers.web.js` 在 `IS_NODE_ENV` 为真时走 onnx_node_default 分支，只认 cuda/webgpu/cpu
+2. **Node 下 WASM 后端不可用** —— onnxruntime-web 的 WASM loader 在 Node 用 blob URL 加载 glue，报 `ERR_UNSUPPORTED_ESM_URL_SCHEME`
+   → **结论：推理必须在 Chromium 渲染进程里跑**，用隐藏 BrowserWindow
+3. **`tokenizer_class` undefined** —— `transformers.js` 加载 tokenizer 前会调 `get_file_metadata`（内部 `fetch_file_head`）探测文件是否存在，而它**硬性要求 URL 协议是 http/https**（`isValidUrl(url, ['http:','https:'])`），自定义协议 `ncl-ai://` 被直接跳过 → tokenizer 文件清单为空 → `tokenizerConfig.tokenizer_class` 崩溃
+   → **结论：模型文件必须走本地 HTTP，不能走 Electron 自定义协议**
+
+**其它踩坑**：
+- `protocol.registerSchemesAsPrivileged` 必须在 `app.whenReady()` **之前**调用，否则渲染层 fetch 不可用
+- 请求要在 `did-finish-load` **之后**再 `webContents.send`，否则 preload 还没注册监听，消息丢失 → 表现为「推理超时」
+- HTTP 服务的 **MIME 要正确**：`.wasm` → `application/wasm`、`.html` → `text/html`、`.js` → `text/javascript`。MIME 错了 ES module 会被浏览器拒绝执行（当时表现是页面加载了但毫无动静、最终超时）
+- Electron 以 root 跑要加 `--no-sandbox`，并用 `xvfb-run -a`
+
+**本地模式 = 规则优先 + 模型补充**：
+小模型（135M）中文能力有限，会胡言乱语。所以 `main/ai-rules.js` 用 12 条确定性规则先扫崩溃现场（OOM / Java 版本不匹配 / Mixin 注入失败 / 缺少依赖 / 加载器不匹配 / OpenGL / 窗口创建 / 模组损坏 / 存档损坏 / 隔离建议 / JVM 原生崩溃 / 兜底），命中后给出**原因 + 可执行修复步骤**（含 setMemory / setJavaPath / setIsolation 等可一键应用的动作）；模型输出降级为「本地模型补充意见（仅供参考）」。
+
+规则引擎测试：`node test/ai-rules-test.js`
+端到端测试：`xvfb-run -a node_modules/.bin/electron --no-sandbox test/local-ai-e2e.js`（会打印模型原始输出 + 合并后的完整分析）
+
+**当前实测**：SmolLM2-135M 加载 ~90s，生成 200 字约 10~30s，输出是中文乱码（符合 135M 预期）；规则引擎结论准确（「检测到 1 类典型问题，最可能是「内存不足（Java 堆溢出）」」）。
+
+### 0.3 配置二选一
+
+`AI_DEFAULTS` 新增 `mode: 'cloud' | 'local'` 与 `localModelId`；`enabled` 判定按模式区分（local 看有没有选模型，cloud 看有没有 Key）。设置页用分段按钮切换，云端相关卡片按模式显隐；本地模型列表带下载进度条。
 
 ## 一、项目位置与运行方式
 

@@ -1039,3 +1039,49 @@ body.has-bg #topbar { box-shadow: 0 1px 0 rgba(0, 0, 0, 0.08); }
 }
 .log-actions-hint { font-size: 11.5px; color: var(--muted); }
 .log-actions-warn { color: #b45309; font-weight: 600; }
+
+/* ---------------- AI 模式分段选择 ---------------- */
+.seg {
+  display: inline-flex; padding: 3px; gap: 3px;
+  background: #f1f2f4; border-radius: 10px;
+}
+.seg-item {
+  padding: 6px 16px; border: none; border-radius: 8px;
+  background: transparent; color: var(--muted);
+  font-size: 12.5px; font-weight: 700; cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.seg-item:hover { color: var(--ink); }
+.seg-item.seg-active {
+  background: #fff; color: var(--accent);
+  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.12);
+}
+
+/* ---------------- 本地模型列表 ---------------- */
+.ai-model-list { width: 100%; display: flex; flex-direction: column; gap: 8px; }
+.ai-model-empty { font-size: 12px; color: var(--muted); padding: 6px 2px; }
+.ai-model-row {
+  display: flex; align-items: center; gap: 14px;
+  padding: 11px 13px; border: 1px solid var(--border);
+  border-radius: var(--radius); background: #fcfcfd;
+  transition: border-color 0.15s, background 0.15s;
+}
+.ai-model-row:hover { border-color: var(--accent-tint-border); }
+.ai-model-row.ai-model-active { border-color: var(--accent); background: var(--accent-tint); }
+.ai-model-info { flex: 1; min-width: 0; }
+.ai-model-name { font-size: 13px; font-weight: 700; margin-bottom: 2px; }
+.ai-model-meta { font-size: 11.5px; color: var(--muted); font-weight: 600; }
+.ai-model-note { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+.ai-model-act { flex: none; display: flex; align-items: center; gap: 8px; }
+.ai-btn-picked { color: var(--accent); border-color: var(--accent); }
+.ai-btn-danger { color: #dc2626; }
+.ai-btn-danger:hover { border-color: #dc2626; }
+.ai-model-progress {
+  width: 130px; height: 6px; border-radius: 999px;
+  background: #e5e7eb; overflow: hidden;
+}
+.ai-model-progress-fill {
+  height: 100%; background: var(--accent); border-radius: 999px;
+  transition: width 0.25s;
+}
+.ai-model-progress-text { font-size: 11.5px; color: var(--muted); font-weight: 600; }

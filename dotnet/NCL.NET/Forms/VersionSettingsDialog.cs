@@ -162,6 +162,8 @@ namespace Ncl.Forms
                 Close();
             };
             Controls.Add(btnReset);
+            Theme.Apply(this);
+            Shown += (sh, e) => Theme.Apply(this);
         }
     }
 }

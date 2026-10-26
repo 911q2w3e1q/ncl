@@ -1,0 +1,13 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8" /><title>NCL Local AI Worker</title></head>
+<body>
+<!--
+  本地 AI 推理页（隐藏窗口）
+  - 由主进程以 BrowserWindow(show:false) 加载
+  - 通过自定义协议 ncl-ai:// 读取模型文件与onnxruntime 的 wasm
+  - 收到主进程的 'ai:infer-request' 后用 WASM 推理并回传结果
+-->
+<script type="module" src="ai-worker.js"></script>
+</body>
+</html>
