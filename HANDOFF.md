@@ -119,6 +119,35 @@
 
 `AI_DEFAULTS` 新增 `mode: 'cloud' | 'local'` 与 `localModelId`；`enabled` 判定按模式区分（local 看有没有选模型，cloud 看有没有 Key）。设置页用分段按钮切换，云端相关卡片按模式显隐；本地模型列表带下载进度条。
 
+### 0.3点五 v1.6.2 发布结果（2026-10-26 完成）
+
+**Release**：https://github.com/911q2w3e1q/ncl/releases/tag/v1.6.2
+**Tag**：`v1.6.2` → commit `06525bb8`（annotated tag object `1f053c5c`）
+
+| 资产 | 字节数 | 说明 |
+|---|---|---|
+| `NCL-1.6.2-win64.zip` | 110,497,491（105.4 MB） | 本次唯一发布资产：Windows 10/11 x64 网页内核版 |
+
+**下载链接**：
+`https://github.com/911q2w3e1q/ncl/releases/download/v1.6.2/NCL-1.6.2-win64.zip`
+
+**包结构**（顶层 exe，无 `engine/` 目录）：
+```
+NCL.exe                    ← 顶层直接双击，204,521,984 字节
+NCL/…（locales、resources/app.asar）
+```
+- `resources/app.asar` = 788,312 字节，已验证含 `/main/fabric-api.js` 与 `/main/wiki-probe.js`
+
+**本次验证**：
+- core-test ✔ / ai-rules-test ✔ / ai-analyzer-test 34/34 ✔ / install-test ✔ / fabric-api-test 11/11 ✔
+- wiki-browser-test 8/8 ✔（内嵌页标题 `Java版26.2 - 中文 Minecraft Wiki`，正文含「正式名称 混沌立方」「发布时间 2026年6月16日」）
+- loader-picker-test 16/16 ✔（点 26.2 / 1.21.4 / 1.12.2 弹窗标题各自跟随）
+
+**本次踩坑**：
+- `test/loader-picker-test.js` 与 `test/shot-loader.js` 原查 `#dl-list .dl-item`，**该容器根本不存在**（真实是 `#dl-items`），导致列表取空、截图版本号回落到默认值。修正后截图才显示真实的 26.3
+- 已安装的版本点击会直接进详情（不再弹加载器选择器），测试需过滤 `.dl-item-tag.installed`
+- 断言变量误写成 `title.includes`（实际是对象），改为 `String(r.title).includes`
+
 ### 0.4 v1.6.0 发布结果（2026-10-26 完成）
 
 **Release**：https://github.com/911q2w3e1q/ncl/releases/tag/v1.6.0
