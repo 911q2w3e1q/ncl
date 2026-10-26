@@ -129,6 +129,16 @@ const mockApi = (channel, ...args) => new Promise((resolve) => {
           quilt: { '1.21.4': '0.29.3', '1.21.1': '0.28.1', '1.20.1': '0.23.0' },
         },
       }); break;
+      case 'versions:loaderVersions': {
+        const { loader, mc } = args[0] || {};
+        const pool = {
+          fabric: ['0.16.10', '0.16.9', '0.16.5', '0.15.11', '0.15.6'],
+          forge: ['47.1.3', '47.1.0', '43.3.13', '43.2.14', '40.2.8'],
+          neoforge: ['21.4.100', '21.4.95', '21.1.72', '20.4.100'],
+          quilt: ['0.29.3', '0.28.1', '0.26.2', '0.23.0'],
+        }[loader] || [];
+        resolve({ ok: true, loader, mc, versions: pool });
+      } break;
       case 'versions:installLoader': {
         const { loader, mc } = args[0] || {};
         const verMap = { forge: '47.1.3', neoforge: '20.4.100', quilt: '0.23.0' }[loader] || '1.0.0';
