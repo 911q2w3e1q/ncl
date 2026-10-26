@@ -29,6 +29,10 @@
         <svg viewBox="0 0 24 24" width="17" height="17"><path fill="currentColor" d="M4 4h6a2 2 0 0 1 2 2v14a2 2 0 0 0-2-2H4V4Zm16 0h-6a2 2 0 0 0-2 2v14a2 2 0 0 1 2-2h6V4Z"/></svg>
         <span>Wiki 整合</span>
       </button>
+      <button class="nav-item" data-page="online">
+        <svg viewBox="0 0 24 24" width="17" height="17"><path fill="currentColor" d="M12 3a4 4 0 1 1 0 8 4 4 0 0 1 0-8Zm0 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm-8 6a2 2 0 0 1 2-2h3l1.4 2.4A7.9 7.9 0 0 0 12 12c.6 0 1.2.1 1.7.2L15.1 9h3A2 2 0 0 1 20 11v1h-2v-1h-1.9l-1 1.7c.6.2 1.2.4 1.7.7l1.3-1.3h3.2l.7 1.5-1.9 1.5A9.9 9.9 0 0 1 18 16l.5 2H17l-.4-1.6a8 8 0 0 0-9.2 0L7 18H5.5L6 16a9.9 9.9 0 0 1-2.2-1.5L1.9 13.1 2.6 11.6h3.2L7 12.9c.5-.3 1.1-.5 1.7-.7L8.3 10.5H6.4V12H4v-1a2 2 0 0 1 0-2Z"/></svg>
+        <span>联机</span>
+      </button>
     </nav>
     <div class="tb-buttons">
       <button class="tb-btn" id="win-min" title="最小化"><svg viewBox="0 0 24 24" width="12" height="12"><path d="M5 11h14v2H5z" fill="currentColor"/></svg></button>
@@ -522,6 +526,112 @@
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 联机页（v1.7.0）：开服 → 局域网 → 内网穿透 → 免费公网地址；另一端可输入地址直接进服 -->
+    <section class="page" id="page-online">
+      <div class="on-layout">
+        <!-- 左列：开服流程 -->
+        <aside class="on-left">
+          <div class="on-card">
+            <div class="on-card-head">
+              <span class="on-step">1</span>
+              <div>
+                <div class="on-card-title">选择游戏版本</div>
+                <div class="on-card-sub">只有已安装的版本才能开服</div>
+              </div>
+            </div>
+            <div class="on-versions" id="on-versions"></div>
+          </div>
+
+          <div class="on-card">
+            <div class="on-card-head">
+              <span class="on-step">2</span>
+              <div>
+                <div class="on-card-title">打开局域网联机</div>
+                <div class="on-card-sub">在游戏里存档 → 选项 → 对局域网开放</div>
+              </div>
+            </div>
+            <ol class="on-steps">
+              <li>启动游戏，进入单人存档</li>
+              <li>暂停菜单 → 选项 → 对局域网开放</li>
+              <li>记下游戏提示的端口号（形如 51234）</li>
+              <li>回到 NCL，点下方「开始穿透」</li>
+            </ol>
+            <div class="on-port-row">
+              <label class="on-field">
+                <span>局域网端口</span>
+                <input type="number" id="on-port-input" placeholder="自动识别，可手填" min="1" max="65535" />
+              </label>
+              <button class="btn-ghost btn-sm" id="on-scan" title="扫描本机找出 Minecraft 服务端端口">扫描端口</button>
+            </div>
+            <div class="on-scan-result" id="on-scan-result"></div>
+          </div>
+
+          <div class="on-card">
+            <div class="on-card-head">
+              <span class="on-step">3</span>
+              <div>
+                <div class="on-card-title">开始内网穿透</div>
+                <div class="on-card-sub">生成一个免费公网地址，交给朋友</div>
+              </div>
+            </div>
+            <label class="on-field">
+              <span>穿透服务</span>
+              <select id="on-provider">
+                <option value="serveo">serveo（免注册·推荐）</option>
+                <option value="ngrok">ngrok（需 authtoken·更稳定）</option>
+              </select>
+            </label>
+            <div class="on-token-row" id="on-token-row" hidden>
+              <label class="on-field">
+                <span>ngrok authtoken</span>
+                <input type="text" id="on-token" placeholder="在 ngrok.com 免费注册后获取" />
+              </label>
+              <button class="btn-ghost btn-sm" id="on-token-save">保存</button>
+            </div>
+            <button class="on-start-btn" id="on-start">
+              <svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M8 5v14l11-7L8 5Z"/></svg>
+              开始穿透
+            </button>
+            <button class="on-stop-btn" id="on-stop" hidden>停止穿透</button>
+          </div>
+        </aside>
+
+        <!-- 右列：公网地址 + 加入联机 -->
+        <div class="on-right">
+          <div class="on-card on-result-card">
+            <div class="on-card-head">
+              <span class="on-step on-step-ok">✓</span>
+              <div>
+                <div class="on-card-title">公网地址</div>
+                <div class="on-card-sub">把它发给朋友，他们粘进 NCL 就能进</div>
+              </div>
+            </div>
+            <div class="on-address-box" id="on-address-box">
+              <div class="on-address" id="on-address">—</div>
+              <button class="on-copy-btn" id="on-copy" disabled>复制</button>
+            </div>
+            <div class="on-status" id="on-status">尚未开始</div>
+            <div class="on-logs" id="on-logs"></div>
+          </div>
+
+          <div class="on-card">
+            <div class="on-card-head">
+              <span class="on-step on-step-join">↓</span>
+              <div>
+                <div class="on-card-title">加入联机</div>
+                <div class="on-card-sub">朋友拿到地址后，在这里粘贴即可直接进服</div>
+              </div>
+            </div>
+            <div class="on-join-row">
+              <input type="text" id="on-join-input" placeholder="例如 serveousercontent.com:23308" />
+              <button class="btn" id="on-join">加入并启动游戏</button>
+            </div>
+            <div class="on-join-msg" id="on-join-msg"></div>
           </div>
         </div>
       </div>

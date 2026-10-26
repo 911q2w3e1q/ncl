@@ -267,6 +267,14 @@ const mockApi = (channel, ...args) => new Promise((resolve) => {
         });
         break;
       }
+      case 'online:scanPorts': resolve({ ok: true, ports: [51234] }); break;
+      case 'online:startTunnel': resolve({ ok: true, address: 'serveousercontent.com:23308', provider: 'serveo', localPort: 51234 }); break;
+      case 'online:stopTunnel': resolve({ ok: true }); break;
+      case 'online:status': resolve({ ok: true, tunnel: { running: false } }); break;
+      case 'online:probe': resolve({ ok: true, result: { ok: true, offline: true } }); break;
+      case 'online:joinServer': resolve({ ok: true, address: (args[0] || {}).address }); break;
+      case 'online:getConfig': resolve({ ok: true, config: { provider: 'serveo', ngrokToken: '', tunnel: { running: false } } }); break;
+      case 'online:saveConfig': resolve({ ok: true }); break;
       case 'updater:check': {
         const noUpd = new URLSearchParams(location.search).get('upd') === 'noupd';
         resolve({
@@ -1028,12 +1036,13 @@ function bindUI() {
     btn.onclick = () => {
       const page = btn.dataset.page;
       currentPage = page;
-      if (page !== 'game' && page !== 'download' && page !== 'settings' && page !== 'wiki') $('soon-title').textContent = `${soonTitles[page] || page}在等你的设计图`;
+      if (page !== 'game' && page !== 'download' && page !== 'settings' && page !== 'wiki' && page !== 'online') $('soon-title').textContent = `${soonTitles[page] || page}在等你的设计图`;
       document.querySelectorAll('.nav-item').forEach((b) => b.classList.toggle('active', b === btn));
       document.querySelectorAll('.page').forEach((p) => p.classList.toggle('active', p.id === 'page-' + page));
       if (page === 'download' && !dl.loaded) dlLoadList();
       if (page === 'settings') renderSettingsPage();
       if (page === 'wiki') wikiOpen();
+      if (page === 'online') onlineOpen();
     };
   });
   $('btn-back-game').onclick = () => document.querySelector('.nav-item[data-page="game"]').click();
@@ -1901,6 +1910,7 @@ bindDropTypeModal();
 dlLoaderInit();
 bindWikiPage();
 wikiBrowserOnReady();
+bindOnlinePage();
 refresh();
 if (typeof aiLoadConfig === 'function') aiLoadConfig();
 /* 预览 / 截图用：?modal=version / ?modal=account / ?modal=vsettings / ?modal=update 直接打开弹窗（方便截图看效果）；
@@ -1921,7 +1931,7 @@ if (location.search.includes('modal=update')) setTimeout(() => checkUpdate(true)
 (function () {
   const qs = new URLSearchParams(location.search);
   const page = qs.get('page');
-  if (page !== 'download' && page !== 'settings' && page !== 'wiki') return;
+  if (page !== 'download' && page !== 'settings' && page !== 'wiki' && page !== 'online') return;
   setTimeout(() => {
     const nav = document.querySelector(`.nav-item[data-page="${page}"]`);
     if (nav) nav.click();
@@ -2000,3 +2010,246 @@ window.addEventListener('unhandledrejection', (e) => {
   const msg = (e && e.reason && e.reason.message) || String(e.reason || '未知错误');
   toast('操作未完成：' + msg);
 });
+
+/* ================= 联机页（v1.7.0） =================
+ * 流程：选已安装版本 → 游戏里开「对局域网开放」→ NCL 扫端口 → 起隧道 → 得到免费公网地址
+ * 朋友那边：把地址粘进「加入联机」→ NCL 启动游戏并用 quickPlay 自动进服。
+ */
+const online = {
+  versionId: '',      // 选中的已安装版本
+  port: '',          // 局域网端口
+  provider: 'serveo',
+  address: '',       // 当前公网地址
+  running: false,
+  logs: [],
+};
+
+function onlineSetStatus(text, kind) {
+  const el = $('on-status');
+  if (!el) return;
+  el.textContent = text;
+  el.className = 'on-status' + (kind ? ' ' + kind : '');
+}
+
+/** 渲染已安装版本列表 */
+function onlineRenderVersions() {
+  const box = $('on-versions');
+  if (!box) return;
+  const list = (state && state.installed) || [];
+  if (!list.length) {
+    box.innerHTML = '<div class="on-ver-empty">还没有已安装的游戏版本。先到「下载」页装一个再来开服。</div>';
+    return;
+  }
+  box.innerHTML = '';
+  for (const v of list) {
+    const row = document.createElement('div');
+    row.className = 'on-ver' + (v.id === online.versionId ? ' active' : '');
+    row.dataset.id = v.id;
+    const badge = v.loader || (v.fabric ? 'fabric' : '');
+    row.innerHTML = `<span class="on-ver-id">${esc(v.id)}</span>` +
+      (badge ? `<span class="on-ver-badge">${esc(badge)}</span>` : '') +
+      (v.time ? `<span class="on-ver-badge">${esc(v.time)}</span>` : '');
+    row.onclick = async () => {
+      online.versionId = v.id;
+      onlineRenderVersions();
+      // 用该版本启动游戏
+      const r = await api('game:launch', v.id);
+      if (r && r.ok) {
+        onlineSetStatus(`已启动 ${v.id}，请在游戏里「对局域网开放」，然后点「扫描端口」`);
+        toast(`已启动 ${v.id}，在游戏里开局域网后回来点「扫描端口」`, true);
+      } else {
+        onlineSetStatus('启动失败：' + ((r && r.error) || '未知错误'), 'err');
+        toast('启动失败：' + ((r && r.error) || '未知错误'));
+      }
+    };
+    box.appendChild(row);
+  }
+}
+
+/** 扫描本机找 MC 端口 */
+async function onlineScanPorts() {
+  const result = $('on-scan-result');
+  const btn = $('on-scan');
+  result.textContent = '正在扫描本机端口…';
+  btn.disabled = true;
+  try {
+    const r = await api('online:scanPorts');
+    if (r && r.ok && r.ports && r.ports.length) {
+      online.port = String(r.ports[0]);
+      $('on-port-input').value = online.port;
+      result.innerHTML = `找到 <b>${r.ports.length}</b> 个 Minecraft 服务端端口：<b>${r.ports.join(', ')}</b>` +
+        (r.ports.length > 1 ? '（已填入第一个）' : '');
+      onlineSetStatus('端口已就绪，点「开始穿透」生成公网地址');
+    } else if (r && r.ok) {
+      result.innerHTML = '没扫到 Minecraft 服务端。请确认游戏已启动，并在存档里点了「对局域网开放」。';
+      onlineSetStatus('未找到 MC 服务端', 'err');
+    } else {
+      result.textContent = '扫描失败：' + ((r && r.error) || '未知错误');
+    }
+  } catch (e) {
+    result.textContent = '扫描失败：' + (e.message || e);
+  }
+  btn.disabled = false;
+}
+
+/** 切换穿透服务时显示/隐藏 ngrok token 输入 */
+function onlineSyncProviderRow() {
+  const row = $('on-token-row');
+  if (row) row.hidden = online.provider !== 'ngrok';
+}
+
+/** 启动隧道 */
+async function onlineStartTunnel() {
+  const port = parseInt($('on-port-input').value || online.port, 10);
+  if (!port || port < 1 || port > 65535) {
+    onlineSetStatus('请先填写或扫描出局域网端口', 'err');
+    toast('请先填写或扫描出局域网端口');
+    return;
+  }
+  online.port = String(port);
+  const provider = $('on-provider').value || 'serveo';
+  online.provider = provider;
+
+  const btn = $('on-start');
+  btn.disabled = true;
+  onlineSetStatus('正在建立隧道…');
+  $('on-logs').textContent = '';
+  online.logs = [];
+
+  try {
+    const r = await api('online:startTunnel', { port, provider });
+    if (r && r.ok && r.address) {
+      online.address = r.address;
+      online.running = true;
+      $('on-address').textContent = r.address;
+      $('on-copy').disabled = false;
+      $('on-stop').hidden = false;
+      onlineSetStatus(`隧道已建立（${provider}），把这个地址发给朋友：${r.address}`, 'ok');
+      toast('公网地址：' + r.address, true);
+    } else {
+      onlineSetStatus('隧道建立失败：' + ((r && r.error) || '未知错误'), 'err');
+      toast('隧道建立失败：' + ((r && r.error) || '未知错误'));
+    }
+  } catch (e) {
+    onlineSetStatus('隧道建立失败：' + (e.message || e), 'err');
+  }
+  btn.disabled = false;
+}
+
+/** 停止隧道 */
+async function onlineStopTunnel() {
+  try { await api('online:stopTunnel'); } catch { /* ignore */ }
+  online.running = false;
+  online.address = '';
+  $('on-address').textContent = '—';
+  $('on-copy').disabled = true;
+  $('on-stop').hidden = true;
+  onlineSetStatus('隧道已停止');
+}
+
+/** 加入联机：填地址 → 启动游戏并自动进服 */
+async function onlineJoin() {
+  const input = $('on-join-input').value.trim();
+  const msg = $('on-join-msg');
+  const btn = $('on-join');
+  if (!input) {
+    msg.className = 'on-join-msg err';
+    msg.textContent = '请先粘贴对方的公网地址';
+    return;
+  }
+  btn.disabled = true;
+  msg.className = 'on-join-msg';
+  msg.textContent = '正在连接…';
+  try {
+    // 先探测对方是不是 MC 服务器
+    const probe = await api('online:probe', { address: input });
+    if (probe && probe.ok && probe.result && probe.result.ok === false) {
+      msg.className = 'on-join-msg err';
+      msg.textContent = '连不上：' + (probe.result.reason || '未知原因');
+      btn.disabled = false;
+      return;
+    }
+    // 直接进服：启动游戏并用 quickPlay 自动连接
+    const versionId = online.versionId || (state && state.settings && state.settings.selectedVersionId);
+    if (!versionId) {
+      msg.className = 'on-join-msg err';
+      msg.textContent = '请先在左边选一个已安装的版本（进服用同一个版本）';
+      btn.disabled = false;
+      return;
+    }
+    const r = await api('online:joinServer', { address: input, versionId });
+    if (r && r.ok) {
+      msg.className = 'on-join-msg ok';
+      msg.textContent = '已启动游戏并自动连接 ' + input + '（若没自动进服，手动点多人游戏→添加服务器）';
+      toast('正在启动游戏并连接 ' + input, true);
+    } else {
+      msg.className = 'on-join-msg err';
+      msg.textContent = '加入失败：' + ((r && r.error) || '未知错误');
+    }
+  } catch (e) {
+    msg.className = 'on-join-msg err';
+    msg.textContent = '加入失败：' + (e.message || e);
+  }
+  btn.disabled = false;
+}
+
+/** 进入联机页 */
+async function onlineOpen() {
+  if (!state) await refresh();
+  onlineRenderVersions();
+  onlineSyncProviderRow();
+  // 读回已保存的 ngrok token
+  try {
+    const r = await api('online:getConfig');
+    if (r && r.ok && r.config) {
+      if (r.config.provider) {
+        online.provider = r.config.provider;
+        $('on-provider').value = r.config.provider;
+        onlineSyncProviderRow();
+      }
+      if (r.config.ngrokToken) $('on-token').value = r.config.ngrokToken;
+      // 若隧道还在跑，恢复显示
+      if (r.config.tunnel && r.config.tunnel.running && r.config.tunnel.address) {
+        online.address = r.config.tunnel.address;
+        online.running = true;
+        $('on-address').textContent = r.config.tunnel.address;
+        $('on-copy').disabled = false;
+        $('on-stop').hidden = false;
+        onlineSetStatus('隧道运行中（' + (r.config.tunnel.provider || '') + '）', 'ok');
+      }
+    }
+  } catch { /* ignore */ }
+}
+
+/** 绑定联机页交互 */
+function bindOnlinePage() {
+  $('on-scan').onclick = onlineScanPorts;
+  $('on-start').onclick = onlineStartTunnel;
+  $('on-stop').onclick = onlineStopTunnel;
+  $('on-join').onclick = onlineJoin;
+  $('on-provider').onchange = (e) => {
+    online.provider = e.target.value;
+    onlineSyncProviderRow();
+  };
+  $('on-token-save').onclick = async () => {
+    const token = $('on-token').value.trim();
+    const r = await api('online:saveConfig', { provider: online.provider, ngrokToken: token });
+    if (r && r.ok) toast('已保存', true);
+    else toast('保存失败');
+  };
+  $('on-copy').onclick = async () => {
+    if (!online.address) return;
+    try {
+      await navigator.clipboard.writeText(online.address);
+      toast('已复制：' + online.address, true);
+    } catch {
+      // 剪贴板不可用时退回到选中提示
+      const el = $('on-address');
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const sel = window.getSelection();
+      sel.removeAllRanges(); sel.addRange(range);
+      toast('已选中地址，按 Ctrl+C 复制');
+    }
+  };
+}

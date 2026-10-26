@@ -1,7 +1,47 @@
-# NCL 开发交接文档（v1.6.2 开发中）
+# NCL 开发交接文档（v1.7.0 开发中）
 
-> 最后更新：2026-10-26（v1.6.2：Wiki 站内百科改用内嵌浏览器直出中文）
+> 最后更新：2026-10-27（v1.7.0：手搓联机 —— 内网穿透 + 免费公网地址）
 > 用途：会话上下文若被清理，新会话凭本文档 + 任务清单无缝接手。
+
+## 〇点七、v1.7.0 新增（联机页）
+
+**用户需求**：「手搓一个联机，Nexus。用法：wiki 整合后面加一个联机，打开后选择已安装的游戏版本打开，打开后进入存档打开局域网联机，打开后 NCL 会自动找到并开始内网穿透，然后发一个免费 IP，别人进入 NCL 复制 IP 就可以打开游戏进入多人游戏玩」
+
+**用户补充选择**（AskUserQuestion）：
+- 穿透方案：两者都做可切换 → 实现为 serveo（默认，免注册）+ ngrok（需 authtoken）
+- 加入方式：NCL 内输入地址自动进服
+- 开服方式：手动点「开始穿透」按钮
+
+### 改动
+
+| 文件 | 变更 |
+|---|---|
+| `main/online-tunnel.js`（**新增**） | 端口扫描 + MC 握手识别 + Tunnel 类（serveo SSH / ngrok）+ 地址解析 + 远端探测 |
+| `main/main.js` | `LAUNCHER_VERSION` → 1.7.0；新增 `online.json` 配置；新增 8 个 `online:*` IPC；退出时清理隧道 |
+| `main/preload.js` | 新增 `online:*` 白名单；**顺带修掉 `fabricApi:versions` / `versions:loaderVersions` 白名单缺失的老 bug** |
+| `renderer/index.html` | 新增「联机」导航按钮（排在 wiki 之后）+ `#page-online` 区块 |
+| `renderer/styles.css` | 新增 `.on-*` 系列样式 |
+| `renderer/renderer.js` | 新增联机页全套逻辑 + mock 渠道 + `?page=online` 深链 |
+| `test/online-test.js`（**新增**） | 20 项单测 |
+| `test/online-ui-test.js`（**新增**） | 18 项 UI 测试 |
+| `test/shot-online.js`（**新增**） | 联机页截图 |
+
+### 关键决策
+
+- **不能用 Cloudflare 快速隧道**：Minecraft 是原始 TCP 协议，HTTP 型隧道全都不通。mcctl 官方文档原话："Generic HTTP tunnels (ngrok, Cloudflare Tunnels) do not work with Minecraft." 实测确认：pinggy 会 TLS 终止（连不上）、localhost.run 与 serveo 拒绝非 80/443 端口（serveo 用 `-R 0:` 才行）
+- **serveo 是默认**：免注册、用系统自带 `ssh.exe`（Windows 10/11 自带）、零下载
+- **端口识别必须用严格判据**：宽松判据（只要回数据就算）会误报 5/13 个端口；改为「登录阶段只接受包 ID 0x00/0x01/0x02」后误报归零
+
+### 实测
+
+- 单测 20/20、UI 测试 18/18 全过
+- 真实端到端：假 MC 服务端 → serveo 隧道 → 公网探测收到 `E2E_OK`（数据完整透传）
+- 截图：`docs/NCL界面-联机页.png`
+
+### 踩坑
+
+- serveo 免费版必须用 `-R 0:127.0.0.1:PORT`（随机端口），写固定端口会报 `remote port forwarding failed for listen port 25565`
+- serveo 免费策略：1 个随机端口 / 10 分钟过期 / 2 分钟无流量关闭 / 最多 2 并发 / 256 KiB/s 带宽上限
 
 ## 〇点六、v1.6.2 新增（Wiki 站内百科内嵌浏览器）
 

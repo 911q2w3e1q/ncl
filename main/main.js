@@ -21,9 +21,10 @@ const aiLocal = require('./ai-local');
 const aiServer = require('./ai-server');
 const fabricApi = require('./fabric-api');
 const wikiProbe = require('./wiki-probe');
+const onlineTunnel = require('./online-tunnel');
 
 const LAUNCHER_NAME = 'NCL';
-const LAUNCHER_VERSION = '1.6.2';
+const LAUNCHER_VERSION = '1.7.0';
 const MANIFEST_URL = 'https://piston-meta.mojang.com/mc/game/version_manifest_v2.json';
 const JAVA_MANIFEST_URL = 'https://launchermeta.mojang.com/v1/products/java-runtime/2ec0cc96c44e5a76b9c8b7c39df7210883d12871/all.json';
 const GITHUB_REPO = '911q2w3e1q/ncl';
@@ -699,6 +700,17 @@ function loadSettings() {
   });
 }
 function saveSettings(s) { saveJSON(settingsPath(), s); }
+
+/* ---------------- 联机配置（v1.7.0） ---------------- */
+/* 单独存一个文件，不混进 settings.json——避免和普通设置互相干扰 */
+function onlineConfigPath() { return path.join(paths().launcher, 'online.json'); }
+function loadOnlineConfig() {
+  return loadJSON(onlineConfigPath(), { provider: 'serveo', ngrokToken: '' });
+}
+function saveOnlineConfig(c) { saveJSON(onlineConfigPath(), c); }
+
+/* 全局唯一的隧道实例（同一时刻只跑一条隧道） */
+const onlineTunnelInstance = new onlineTunnel.Tunnel();
 
 /* ---------------- AI 报错分析（配置 / 现场采集 / 修复执行） ---------------- */
 
@@ -2345,6 +2357,85 @@ function registerIPC() {
 
   ipcMain.handle('game:stop', () => ({ ok: stopGame() }));
 
+  /* ---------- 联机（v1.7.0） ---------- */
+  /* 扫描本机找出 Minecraft 局域网服务端的端口 */
+  ipcMain.handle('online:scanPorts', async () => {
+    try {
+      const ports = await onlineTunnel.findMinecraftPorts();
+      return { ok: true, ports };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  });
+
+  /* 启动内网穿透，返回公网地址 */
+  ipcMain.handle('online:startTunnel', async (_, payload) => {
+    try {
+      const cfg = loadOnlineConfig();
+      const port = Number(payload && payload.port);
+      const provider = (payload && payload.provider) || cfg.provider || 'serveo';
+      const token = (payload && payload.ngrokToken) || cfg.ngrokToken || '';
+      const result = await onlineTunnelInstance.start({ localPort: port, provider, authToken: token });
+      return { ok: true, address: result.address, provider: result.provider, localPort: result.localPort };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('online:stopTunnel', () => {
+    try { onlineTunnelInstance.stop(); } catch { /* 忽略 */ }
+    return { ok: true };
+  });
+
+  ipcMain.handle('online:status', () => ({ ok: true, tunnel: onlineTunnelInstance.status() }));
+
+  /* 探测远端地址是不是 MC 服务器（加入联机前先验） */
+  ipcMain.handle('online:probe', async (_, payload) => {
+    try {
+      const parsed = onlineTunnel.parseServerAddress(payload && payload.address);
+      if (!parsed) return { ok: false, error: '地址格式不对，应为 host:port' };
+      const result = await onlineTunnel.probeRemoteServer(parsed.host, parsed.port);
+      return { ok: true, result, parsed };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  });
+
+  /* 加入联机：启动游戏并用 quickPlay 自动进服 */
+  ipcMain.handle('online:joinServer', async (_, payload) => {
+    try {
+      const parsed = onlineTunnel.parseServerAddress(payload && payload.address);
+      if (!parsed) return { ok: false, error: '地址格式不对，应为 host:port' };
+      const versionId = (payload && payload.versionId) || loadSettings().selectedVersionId;
+      if (!versionId) return { ok: false, error: '请先选择游戏版本' };
+      // 把地址写进该版本的 serverAddress，buildLaunchCommand 会据此注入 quickPlayMultiplayer
+      const settings = loadSettings();
+      settings.perVersion = settings.perVersion || {};
+      settings.perVersion[versionId] = { ...(settings.perVersion[versionId] || {}), serverAddress: parsed.address };
+      saveSettings(settings);
+      const promise = launchGame(versionId, (line) => { if (win) win.webContents.send('launcher://game-log', line); });
+      promise.then(({ code, signal }) => { if (win) win.webContents.send('launcher://game-exit', { code, signal }); });
+      promise.catch((e) => { if (win) win.webContents.send('launcher://game-exit', { code: null, error: e.message }); });
+      return { ok: true, address: parsed.address, versionId };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('online:getConfig', () => ({ ok: true, config: { ...loadOnlineConfig(), tunnel: onlineTunnelInstance.status() } }));
+
+  ipcMain.handle('online:saveConfig', (_, payload) => {
+    try {
+      const cfg = loadOnlineConfig();
+      if (payload && payload.provider) cfg.provider = payload.provider;
+      if (payload && typeof payload.ngrokToken === 'string') cfg.ngrokToken = payload.ngrokToken.trim();
+      saveOnlineConfig(cfg);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  });
+
   /* ---------- AI 报错分析 ---------- */
   /* 本地推理窗口的回执与进度 */
   ipcMain.on('ai:local-response', (_e, payload) => aiLocal.onWorkerResponse(payload));
@@ -2701,6 +2792,7 @@ if (process.env.CUBE_TEST_MODE !== '1') {
     stopGame();
     try { aiLocal.disposeWorker(); } catch { /* 忽略 */ }
     try { if (aiServerInstance) aiServerInstance.close(); } catch { /* 忽略 */ }
+    try { onlineTunnelInstance.stop(); } catch { /* 忽略 */ }
   });
 }
 
