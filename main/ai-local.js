@@ -59,14 +59,17 @@ function onWorkerResponse(payload) {
   const p = pending.get(payload.id);
   if (!p) return;
   pending.delete(payload.id);
+  progressCbs.delete(payload.id);
   clearTimeout(p.timer);
   if (payload.error) p.reject(new Error(payload.error));
   else p.resolve(payload);
 }
 
-let progressCb = null;
+const progressCbs = new Map();
 function onWorkerProgress(payload) {
-  if (progressCb) { try { progressCb(payload || {}); } catch {} }
+  const id = payload && payload.id;
+  const cb = id ? progressCbs.get(id) : null;
+  if (cb) { try { cb(payload || {}); } catch {} }
 }
 
 function waitReady(w) {
@@ -86,12 +89,12 @@ function waitReady(w) {
 async function requestGeneration(opts, onProgress) {
   const w = ensureWorker(opts.getWin, opts.protocolName, opts.baseUrl);
   const id = `ai-${++reqSeq}`;
-  progressCb = onProgress || null;
+  if (onProgress) progressCbs.set(id, onProgress);
   await waitReady(w);
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       pending.delete(id);
-      progressCb = null;
+      progressCbs.delete(id);
       reject(new Error('本地模型推理超时（可在设置里换更大的模型或减少日志长度）'));
     }, INFER_TIMEOUT);
     pending.set(id, { resolve, reject, timer });

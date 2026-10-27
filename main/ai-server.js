@@ -20,11 +20,20 @@ function statOf(p) {
   try { return fs.statSync(p); } catch { return null; }
 }
 
-function cors(res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+function cors(res, req) {
+  const origin = String((req && req.headers && req.headers.origin) || '');
+  const local = /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i.test(origin);
+  res.setHeader('Access-Control-Allow-Origin', local ? origin : 'null');
   res.setHeader('Access-Control-Allow-Methods', 'GET,HEAD,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', '*');
   res.setHeader('Access-Control-Expose-Headers', 'Content-Length,Content-Range,Accept-Ranges');
+}
+
+function safeJoin(base, parts) {
+  const root = path.resolve(base);
+  const target = path.resolve(root, ...parts.filter(Boolean));
+  if (target !== root && !target.startsWith(root + path.sep)) return null;
+  return target;
 }
 
 function mimeOf(file) {
@@ -39,7 +48,7 @@ function mimeOf(file) {
 
 function startModelServer(launcherDir) {
   const server = http.createServer((req, res) => {
-    cors(res);
+    cors(res, req);
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
     let pathname = '';
@@ -56,13 +65,13 @@ function startModelServer(launcherDir) {
       const repo = segs.slice(1, 3).join('/');
       const rel = segs.slice(3).join('/');
       if (!repo || !rel) { res.writeHead(404); res.end('Not Found'); return; }
-      file = path.join(aiModels.modelDir(launcherDir, repo), ...rel.split('/'));
+      file = safeJoin(aiModels.modelDir(launcherDir, repo), rel.split('/'));
     } else if (segs[0] === 'ort') {
       
-      file = path.join(aiRuntimeDir(), 'ort', segs.slice(1).join('/'));
+      file = safeJoin(aiRuntimeDir(), ['ort', ...segs.slice(1)]);
     } else if (segs[0] === 'app') {
       
-      file = path.join(aiRuntimeDir(), ...segs.slice(1));
+      file = safeJoin(aiRuntimeDir(), segs.slice(1));
     }
     if (!file || !exists(file)) { res.writeHead(404); res.end('Not Found'); return; }
     const st = statOf(file);

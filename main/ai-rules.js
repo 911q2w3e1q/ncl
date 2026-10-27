@@ -118,11 +118,16 @@ const RULES = [
 ];
 
 function analyzeByRules(ctx) {
+  const c = ctx || {};
+  const logLines = Array.isArray(c.logTail)
+    ? c.logTail
+    : String(c.logTail || '').split(/\r?\n/).filter(Boolean);
+  const errLines = Array.isArray(c.errorLines) ? c.errorLines : [];
   const text = [
-    ...(ctx.errorLines || []),
-    ...(ctx.logTail || []),
-    ctx.exitCode !== undefined && ctx.exitCode !== null ? `exitCode ${ctx.exitCode}` : '',
-    ctx.signal ? `signal ${ctx.signal}` : '',
+    ...errLines,
+    ...logLines,
+    c.exitCode !== undefined && c.exitCode !== null ? `exitCode ${c.exitCode}` : '',
+    c.signal ? `signal ${c.signal}` : '',
   ].filter(Boolean).join('\n');
 
   const causes = [];
@@ -166,8 +171,9 @@ function analyzeByRules(ctx) {
   }
 
   
-  const jvmArgs = (ctx.settings && ctx.settings.jvmArgs) || '';
-  const memMatch = /-Xmx(\d+)/.exec(jvmArgs);
+  const jvmArgs = (c.settings && c.settings.jvmArgs) || c.jvmArgs || '';
+  const memFromSettings = c.settings && c.settings.memory ? `-Xmx${c.settings.memory}M` : '';
+  const memMatch = /-Xmx(\d+)/.exec(`${jvmArgs} ${memFromSettings}`) || (c.memoryMB ? { 1: String(c.memoryMB) } : null);
   if (memMatch && parseInt(memMatch[1], 10) < 2048 && !seen.has('oom')) {
     causes.push({
       title: '分配内存偏小',

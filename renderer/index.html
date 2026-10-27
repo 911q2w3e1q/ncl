@@ -625,6 +625,7 @@
       <div class="modal-tabs">
         <button class="mtab active" data-atab="offline">离线账户</button>
         <button class="mtab" data-atab="littleskin">LittleSkin</button>
+        <button class="mtab" data-atab="password">账号密码</button>
         <button class="mtab" data-atab="microsoft">微软正版</button>
       </div>
       <div class="modal-body">
@@ -647,6 +648,20 @@
           </label>
           <p class="dim">登录后会按 LittleSkin 仪表盘角色卡片展示头像、皮肤模型与披风信息，并自动用于游戏内外置登录。</p>
           <button class="btn" id="btn-ys-login">登录 LittleSkin</button>
+        </div>
+        <div id="atab-password" class="atab-body" hidden>
+          <label class="field"><span class="field-label">账号（邮箱）</span>
+            <input type="text" id="pwd-user" placeholder="你拿到的账号邮箱" autocomplete="off" />
+          </label>
+          <label class="field"><span class="field-label">密码</span>
+            <input type="password" id="pwd-pass" placeholder="账号密码" autocomplete="off" />
+          </label>
+          <label class="field"><span class="field-label">皮肤站 API（可选，非微软账号时使用）</span>
+            <input type="text" id="pwd-api" value="https://littleskin.cn/api/yggdrasil" />
+          </label>
+          <p class="dim">直接用邮箱与密码登录。程序会先尝试皮肤站（Yggdrasil）验证；若不是皮肤站账号，则自动打开微软官方登录页并自动填入账号与密码，密码由你在微软页面中确认。密码不会写入本地配置文件。</p>
+          <button class="btn" id="btn-pwd-login">使用账号密码登录</button>
+          <div id="pwd-status" class="ms-device-status" hidden></div>
         </div>
         <div id="atab-microsoft" class="atab-body" hidden>
           <p class="dim">使用微软账号登录 Minecraft Java 版（账号需已购买游戏，或绑定含本游戏的 Xbox Game Pass）。采用官方设备码流程：启动器不接触你的密码，只需在浏览器里输入一个 8 位代码完成授权，可在手机 / 其他电脑上操作。</p>
