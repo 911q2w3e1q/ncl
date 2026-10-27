@@ -328,7 +328,7 @@ const api = window.cube
   : mockApi;
 const onEvent = window.cube ? (ch, cb) => window.cube.on(ch, cb) : mockOn;
 
-let state = null;
+let state = {};
 let manifestCache = null;
 let installing = null;
 let logLines = 0;
@@ -429,9 +429,10 @@ function sysMemMaxGB() {
   return Math.max(2, Math.min(32, Math.floor((sysMB - 512) / 1024)));
 }
 function currentVS() {
-  const vid = state.settings.selectedVersionId;
-  const g = state.settings.global;
-  const p = (vid && state.settings.perVersion[vid]) || {};
+  const st = state.settings || {};
+  const vid = st.selectedVersionId;
+  const g = st.global || {};
+  const p = (vid && (st.perVersion || {})[vid]) || {};
   return { ...g, ...p };
 }
 function renderSettingsCard() {
@@ -740,6 +741,7 @@ async function checkUpdate(manual) {
 }
 function openUpdateModal(info) {
   up.info = info;
+  up.updateReady = false;
   $('um-cur').textContent = 'v' + (info.current);
   $('um-new').textContent = 'v' + info.latest;
   $('um-notes').innerHTML = fmtUpdateNotes(info.notes);
@@ -758,10 +760,19 @@ function openUpdateModal(info) {
   $('modal-update').hidden = false;
 }
 function bindUpdateModal() {
-  $('um-btn-download').addEventListener('click', async () => {
+  const btn = $('um-btn-download');
+  btn.onclick = async () => {
     if (up.downloading) return;
+    if (up.updateReady) {
+      btn.disabled = true; btn.textContent = '正在重启…';
+      const ar = await api('updater:apply');
+      if (ar && ar.ok === false) {
+        toast('安装失败：' + (ar.error || '未知错误'));
+        btn.disabled = false; btn.textContent = '立即重启并安装';
+      }
+      return;
+    }
     up.downloading = true;
-    const btn = $('um-btn-download');
     btn.disabled = true; btn.textContent = '下载中 0%';
     $('um-progress').hidden = false;
     $('um-pfill').style.width = '0%';
@@ -771,25 +782,22 @@ function bindUpdateModal() {
       if (!r || !r.ok) {
         toast('下载失败：' + ((r && r.error) || '未知错误'));
         btn.textContent = '重试下载';
+        btn.disabled = false;
         return;
       }
       $('um-pfill').style.width = '100%';
       $('um-ptext').textContent = '下载完成，可以安装了';
+      up.updateReady = true;
       btn.textContent = '立即重启并安装';
       btn.disabled = false;
-      btn.onclick = async () => {
-        btn.disabled = true; btn.textContent = '正在重启…';
-        const ar = await api('updater:apply');
-        if (ar && ar.ok === false) { toast('安装失败：' + (ar.error || '未知错误')); btn.disabled = false; btn.textContent = '立即重启并安装'; }
-        
-      };
     } catch (e) {
       toast('下载失败：' + ((e && e.message) || e));
       btn.textContent = '重试下载';
+      btn.disabled = false;
     } finally {
       up.downloading = false;
     }
-  });
+  };
   onEvent('launcher://up-progress', (p) => {
     if ($('modal-update').hidden) return;
     if (p.stage === 'error') { $('um-ptext').textContent = p.message || '下载出错'; return; }
@@ -908,10 +916,13 @@ async function loadVerList() {
           if (!list2.length) { toast(`未获取到 ${label} 版本列表`, false); return; }
           const want = window.prompt(`安装 ${v.id} 的哪个 ${label} 版本？\n（当前目录版本：${(cat[v.type] || {})[v.id] || '未知'}）`, list2[0]);
           if (!want) return;
-          const r = await api('versions:installLoader', { loader: v.type, mc: v.id, version: want.trim() });
+          const r = v.type === 'fabric'
+            ? await api('versions:installFabric', { mc: v.id, version: want.trim() })
+            : await api('versions:installLoader', { loader: v.type, mc: v.id, version: want.trim() });
           if (r && r.ok) {
             toast(`${v.id} ${label} ${want.trim()} 安装完成`, true);
-            if (r.id) await api('versions:select', r.id);
+            const newId = (r.result && r.result.id) || r.id;
+            if (newId) await api('versions:select', newId);
             await refresh(); loadVerList();
           } else toast((r && r.error) || '安装失败', false);
         };
@@ -929,7 +940,7 @@ async function loadVerList() {
             ? await api('versions:installFabric', v.id)
             : await api('versions:installLoader', { loader: v.type, mc: v.id });
           installing = null;
-          if (r.ok) {
+          if (r && r.ok) {
             toast(`${v.id} ${label} 安装完成`, true);
             
             const newId = (r.result && r.result.id) || r.id || v.loaderInstance;
@@ -949,7 +960,7 @@ async function loadVerList() {
         installing = { id: v.id, btn };
         const r = await api('versions:install', v.id);
         installing = null;
-        if (r.ok) { toast(`${v.id} 安装完成`, true); await api('versions:select', v.id); closeModal('modal-version'); await refresh(); }
+        if (r && r.ok) { toast(`${v.id} 安装完成`, true); await api('versions:select', v.id); closeModal('modal-version'); await refresh(); }
         else { toast(r.error); btn.disabled = false; btn.textContent = '安装'; }
       };
     }
@@ -965,13 +976,14 @@ function openAccountModal() {
 function renderAccountList() {
   const wrap = $('account-list-wrap');
   const list = $('account-list');
-  if (!state.accounts.length) { wrap.hidden = true; return; }
+  const accs = state.accounts || [];
+  if (!accs.length) { wrap.hidden = true; return; }
   wrap.hidden = false;
   list.innerHTML = '';
-  for (const a of state.accounts) {
+  for (const a of accs) {
     const row = document.createElement('div');
     row.className = 'acc-row' + (state.selectedAccount && state.selectedAccount.id === a.id ? ' sel' : '');
-    row.innerHTML = `<span class="aname">${a.name}</span><span class="atype">${a.type === 'yggdrasil' ? 'LittleSkin' : a.type === 'microsoft' ? '微软正版' : '离线'} · ${a.uuid.slice(0, 8)}…</span>`;
+    row.innerHTML = `<span class="aname">${esc(a.name || '')}</span><span class="atype">${a.type === 'yggdrasil' ? 'LittleSkin' : a.type === 'microsoft' ? '微软正版' : '离线'} · ${String(a.uuid || '').slice(0, 8)}…</span>`;
     const acts = document.createElement('div');
     acts.className = 'arow-actions';
     if (!(state.selectedAccount && state.selectedAccount.id === a.id)) {
@@ -1056,8 +1068,9 @@ function onProgress(p) {
 let refreshSeq = 0;
 async function refresh() {
   const seq = ++refreshSeq;
-  state = await api('launcher:getState');
+  const s = await api('launcher:getState');
   if (seq !== refreshSeq) return;
+  state = s || {};
   await renderAccountCard();
   if (seq !== refreshSeq) return;
   renderVersionCard();
@@ -1148,7 +1161,7 @@ function bindUI() {
     $('ms-code').textContent = '······';
     $('ms-status').textContent = '正在获取设备码…';
     const r = await api('account:loginMicrosoft');
-    if (r.ok) {
+    if (r && r.ok) {
       $('ms-status').textContent = '登录成功';
       await refresh(); renderAccountList();
       toast(`微软账号 ${r.account.name} 登录成功`, true);
@@ -1399,21 +1412,23 @@ async function dlLoaderLoadApiVersion() {
   }
 }
 
+let dlLoaderRenderSeq = 0;
 async function dlLoaderRender() {
+  const seq = ++dlLoaderRenderSeq;
+  const loader = dlLoader.loader;
+  const mc = dlLoader.mc;
+  const search = dlLoader.search;
   const box = $('dl-loader-list');
   box.innerHTML = '<div class="dl-empty">加载中…</div>';
-  const r = await api('versions:loaderVersions', { loader: dlLoader.loader, mc: dlLoader.mc });
-  if (dlLoader.search) {
-    
-  }
+  const r = await api('versions:loaderVersions', { loader, mc });
+  if (seq !== dlLoaderRenderSeq) return;
   if (!r || !r.ok) {
     box.innerHTML = `<div class="dl-empty">${esc((r && r.error) || '获取加载器版本失败')}</div>`;
     return;
   }
-  dlLoader.versions = r.versions || [];
-  const list = dlLoader.search
-    ? dlLoader.versions.filter((v) => String(v).includes(dlLoader.search))
-    : dlLoader.versions;
+  const allVersions = r.versions || [];
+  dlLoader.versions = allVersions;
+  const list = search ? allVersions.filter((v) => String(v).includes(search)) : allVersions;
   if (!list.length) {
     box.innerHTML = '<div class="dl-empty">该游戏版本暂无可用的加载器版本</div>';
     return;
@@ -1423,21 +1438,21 @@ async function dlLoaderRender() {
     const row = document.createElement('div');
     row.className = 'ver-row';
     row.innerHTML = `<span class="vname">${esc(v)}</span>` +
-      `<span class="vtype ${dlLoader.loader}">${LOADER_LABELS[dlLoader.loader]}</span>` +
-      `<span class="vmeta">${esc(dlLoader.mc)}</span>`;
+      `<span class="vtype ${loader}">${LOADER_LABELS[loader]}</span>` +
+      `<span class="vmeta">${esc(mc)}</span>`;
     const btn = document.createElement('button');
     btn.className = 'btn';
     btn.textContent = '安装';
     btn.onclick = async () => {
       btn.disabled = true;
       btn.textContent = '安装中…';
-      const withApi = dlLoader.loader === 'fabric' && ($('dl-fabric-api') || {}).checked !== false;
-      const r2 = dlLoader.loader === 'fabric'
-        ? await api('versions:installFabric', { mc: dlLoader.mc, version: v, withFabricApi: withApi })
-        : await api('versions:installLoader', { loader: dlLoader.loader, mc: dlLoader.mc, version: v });
+      const withApi = loader === 'fabric' && ($('dl-fabric-api') || {}).checked !== false;
+      const r2 = loader === 'fabric'
+        ? await api('versions:installFabric', { mc, version: v, withFabricApi: withApi })
+        : await api('versions:installLoader', { loader, mc, version: v });
       if (r2 && r2.ok) {
         const apiInfo = r2.result && r2.result.fabricApi;
-        let msg = `${dlLoader.mc} ${LOADER_LABELS[dlLoader.loader]} ${v} 安装完成`;
+        let msg = `${mc} ${LOADER_LABELS[loader]} ${v} 安装完成`;
         if (apiInfo && apiInfo.version) msg += `，Fabric API ${apiInfo.version} 已装好`;
         else if (apiInfo && apiInfo.skipped) msg += `（${apiInfo.skipped}）`;
         toast(msg, true);

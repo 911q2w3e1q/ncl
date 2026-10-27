@@ -148,14 +148,18 @@ async function downloadWithProgress(url, dest, onBytes) {
     const ws = fs.createWriteStream(tmp);
     const reader = res.body.getReader();
     let got = 0;
+    let writeError = null;
+    ws.on('error', (e) => { writeError = e; });
     for (;;) {
+      if (writeError) throw writeError;
       const { done, value } = await reader.read();
       if (done) break;
       got += value.length;
-      if (!ws.write(value)) await new Promise((r) => ws.once('drain', r));
+      if (!ws.write(value)) await new Promise((r, j) => { ws.once('drain', r); ws.once('error', j); });
       if (onBytes) onBytes(got);
     }
     await new Promise((r, j) => { ws.end(() => r()); ws.on('error', j); });
+    if (writeError) throw writeError;
     fs.renameSync(tmp, dest);
     return dest;
   } catch (e) {

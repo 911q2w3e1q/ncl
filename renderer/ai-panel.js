@@ -27,7 +27,7 @@ const AI_RISK_TEXT = { low: '低风险', medium: '中风险', high: '高风险' 
 
 function aiRenderResult(analysis, versionId) {
   ai.analysis = analysis || {};
-  ai.versionId = versionId || ai.versionId;
+  if (versionId) ai.versionId = versionId;
   $('ai-status').hidden = true;
   $('ai-error').hidden = true;
   $('ai-result').hidden = false;
@@ -110,7 +110,7 @@ async function aiAnalyze(trigger) {
       aiShowError((r && r.error) || '分析失败');
       return;
     }
-    aiRenderResult(r.analysis, (r.analysis && r.analysis.versionId) || (state && state.settings && state.settings.selectedVersionId) || '');
+    aiRenderResult(r.analysis, r.versionId || (r.analysis && r.analysis.versionId) || ((state && state.settings && state.settings.selectedVersionId) || ''));
   } catch (e) {
     aiShowError(e.message || String(e));
   } finally {
@@ -145,7 +145,7 @@ async function aiApplySolution(actions, btn) {
     if (failed.length) toast(`有 ${failed.length} 项未能应用：${failed[0].error || ''}`);
 
     
-    const vid = ai.versionId || (state && state.selectedVersionId);
+    const vid = ai.versionId || (state && state.settings && state.settings.selectedVersionId);
     if (vid) {
       btn.textContent = '正在重启验证…';
       const la = await api('game:launch', vid);
