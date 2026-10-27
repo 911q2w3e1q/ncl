@@ -2022,7 +2022,10 @@ async function updaterDownload(onProgress) {
 /** 平台更新脚本：等待旧进程退出 → 用 stage 里的新文件覆盖 → 重启启动器 */
 function buildUpdaterScript(kind, stage, target, pid) {
   if (kind === 'bat') {
-    return `@echo off\r\nchcp 65001 >nul\r\n:wait\r\ntasklist /FI "PID eq ${pid}" 2>nul | find /i "${pid}" >nul\r\nif not errorlevel 1 (timeout /t 1 /nobreak >nul & goto wait)\r\nxcopy "${stage}" "${target}" /E /I /H /Y /Q >nul\r\nstart "" "${target}\\NCL.exe"\r\n`;
+    // 先删掉旧的 engine 目录再复制，避免新旧运行时混在一起
+    // （v1.6.x – v1.7.0 是「顶层 electron.exe」，v1.8.0 是「顶层壳 + engine/」，
+    //  结构变了必须整体替换）
+    return `@echo off\r\nchcp 65001 >nul\r\n:wait\r\ntasklist /FI "PID eq ${pid}" 2>nul | find /i "${pid}" >nul\r\nif not errorlevel 1 (timeout /t 1 /nobreak >nul & goto wait)\r\nif exist "${target}\\engine" rmdir /S /Q "${target}\\engine"\r\nxcopy "${stage}" "${target}" /E /I /H /Y /Q >nul\r\nstart "" "${target}\\NCL.exe"\r\n`;
   }
   // sh（Linux / macOS 通用）
   const relaunch = kind === 'sh-mac' ? `open "${target}"` : `"${target}/NCL.sh"`;
@@ -2045,28 +2048,38 @@ async function updaterApply() {
   else if (/\.tar\.gz$/.test(pending.file)) await extractTarGz(pending.file, stage);
   else return { ok: false, error: '不支持的安装包格式' };
 
-  // 定位解压出的启动器根（不同平台包结构不一样）
-  let target, kind;
+  // 定位解压出的启动器根（不同平台/不同版本的包结构不一样）
+  //   v1.8.0 的 Windows 包：顶层直接是 NCL.exe + engine/
+  //   v1.6.x 及更早：顶层是 NCL/ 目录，NCL.exe 在里面
+  let target, kind, stageSrc;
   if (process.platform === 'win32') {
-    const inner = path.join(stage, 'NCL');
     target = portableBaseDir();
     kind = 'bat';
-    if (!exists(path.join(inner, 'NCL.exe'))) return { ok: false, error: '安装包内未找到 NCL.exe' };
+    const flatExe = path.join(stage, 'NCL.exe');
+    const innerExe = path.join(stage, 'NCL', 'NCL.exe');
+    if (exists(flatExe)) {
+      stageSrc = stage;                       // 新结构：顶层就是启动器根
+    } else if (exists(innerExe)) {
+      stageSrc = path.join(stage, 'NCL');     // 旧结构：NCL/ 子目录
+    } else {
+      return { ok: false, error: '安装包内未找到 NCL.exe' };
+    }
   } else if (process.platform === 'linux') {
     target = portableBaseDir();
     kind = 'sh';
+    stageSrc = stage;
     if (!exists(path.join(stage, 'NCL.sh'))) return { ok: false, error: '安装包内未找到 NCL.sh' };
   } else {
     // macOS：解压出 NCL.app，替换 .app 所在目录
     const appPath = app.getPath('exe').replace(/\/Contents\/MacOS\/[^/]+$/, '');
     target = path.dirname(appPath);
     kind = 'sh-mac';
+    stageSrc = stage;
     if (!exists(path.join(stage, 'NCL.app'))) return { ok: false, error: '安装包内未找到 NCL.app' };
   }
   if (!target) return { ok: false, error: '无法定位启动器目录' };
 
   const scriptPath = path.join(path.join(paths().launcher, 'updates'), kind === 'bat' ? 'apply-update.bat' : 'apply-update.sh');
-  const stageSrc = process.platform === 'win32' ? path.join(stage, 'NCL') : stage;
   fs.writeFileSync(scriptPath, buildUpdaterScript(kind, stageSrc, target, process.pid));
   if (kind !== 'bat') fs.chmodSync(scriptPath, 0o755);
 

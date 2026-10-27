@@ -79,15 +79,19 @@
 
 ## 下载（v1.8.0）
 
-[GitHub Releases](https://github.com/911q2w3e1q/ncl/releases) 提供开箱即用的打包版本，无需 Node 环境：
+[GitHub Releases](https://github.com/911q2w3e1q/ncl/releases) 目前只保留两个可用版本：
 
 | 平台 | 包 | 用法 |
 | --- | --- | --- |
-| **Windows 10/11（Electron 版，最新版）** | **`NCL-1.8.0-win64.zip`** | **解压后双击顶层 `NCL.exe`（与 `engine` 文件夹保持在一起）** |
-| Windows 7 SP1 / 8 / 10 / 11（.NET 版） | `NCL-1.5.0-win64-dotnet.zip` | 解压后双击 `NCL.exe`，仅 3 个文件，内存占用约为 Electron 版的 1/5 |
+| **Windows 10/11（Electron 版，最新版）** | **`NCL-1.8.0-win64.zip`**（131 MB） | **解压后双击顶层 `NCL.exe`（与 `engine` 文件夹保持在一起）** |
+| Windows 7 SP1 / 8 / 10 / 11（.NET 版，低内存） | `NCL-1.5.0-win64-dotnet.zip`（0.5 MB） | 解压后双击 `NCL.exe`，仅 3 个文件，内存占用约为 Electron 版的 1/5 |
+| Windows 10/11（Electron 版，旧版） | `NCL-1.5.0-win64.zip`（128 MB） | 解压后双击 `engine\NCL.exe` |
 | Linux x64 | `NCL-1.5.0-linux-x64.tar.gz` | 解压后执行 `./NCL.sh` |
 | macOS Apple Silicon | `NCL-1.5.0-macos-arm64.zip` | 解压后右键 → 打开 `NCL.app`（未签名，首次需右键绕过 Gatekeeper） |
 | macOS Intel | `NCL-1.5.0-macos-x64.zip` | 同上 |
+
+> **v1.0.0 – v1.7.0 的 Release 已全部删除**：v1.6.0 – v1.7.0 存在「双击黑屏」严重回归，
+> v1.0.0 – v1.4.0 功能已被 v1.8.0 完全覆盖。请直接使用 v1.8.0。
 
 **v1.8.0 的变化：修复「双击黑屏」**。v1.6.0 – v1.7.0 双击运行后进程存活但窗口全黑，根因是打包时的「激进瘦身」把 GPU 回退文件（`vk_swiftshader.dll` / `vulkan-1.dll` / `dxcompiler.dll` / `dxil.dll`）删干净了，在显卡驱动不支持 D3D12/Vulkan 的 Windows 机器上 GPU 进程必然初始化失败且无软件回退。本版**完全取消裁剪**、运行时恢复到 v1.5.0 的完整形态（locales 55 个语言包全留），打包结构也回退成「顶层 89KB 启动壳 + `engine/` 完整运行时」，另加一道保险：GPU 进程连续崩溃 3 次会自动用软件渲染重启。体积因此从 ~105 MB 涨回 ~131 MB —— 这 26 MB 正是让窗口不再全黑的文件。
 
@@ -99,7 +103,7 @@
 
 **v1.6.0 的变化**：网页内核 Windows 版新增**免 API Key 的内置本地小模型 AI**（SmolLM2-135M / Qwen2.5-0.5B，设置页一键下载，之后完全离线分析）。
 
-> ⚠️ **v1.6.0 – v1.7.0 存在「双击黑屏」回归，已在 v1.8.0 修复，请直接用 v1.8.0。**
+> ⚠️ **v1.6.0 – v1.7.0 存在「双击黑屏」回归，已在 v1.8.0 修复。**
 > 详细的根因分析与逐文件对照见 [`RELEASE_NOTES_v1.8.0.md`](RELEASE_NOTES_v1.8.0.md)。
 
 **更新方式**：设置 → 启动器 → 检查更新 → 下载并安装，启动器会自动重启完成替换（也可直接下载新版包手动覆盖）。
