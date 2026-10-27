@@ -1,6 +1,7 @@
-/* 通过 GitHub Git Database API 推送源码到 main（沙箱连不上 github.com git push）
- * 用法：node tools/push-source.js <tag> "<commit message>"
- * 文件集 = 远程 HEAD 树 与 本地 HEAD 树 的差异（git diff --name-status <remoteSha> HEAD）
+#!/usr/bin/env node
+/* 推送源码到 GitHub
+ *
+ * 用法：node tools/push-source.js
  */
 'use strict';
 const { execSync } = require('child_process');
@@ -30,7 +31,8 @@ async function api(method, urlPath, body) {
   });
   const text = await res.text();
   let json = null;
-  try { json = JSON.parse(text); } catch { /* 非 JSON */ }
+  try { json = JSON.parse(text); } catch { 
+ }
   if (!res.ok) throw new Error(`${method} ${urlPath} → HTTP ${res.status}: ${text.slice(0, 300)}`);
   return json;
 }
@@ -42,7 +44,7 @@ async function api(method, urlPath, body) {
   const baseTree = headCommit.tree.sha;
   console.log('远程 main HEAD:', headSha.slice(0, 8));
 
-  // 差异文件：本地 HEAD tree vs 远程 HEAD tree（远程 commit 对象本地不存在，用 tree API 比对）
+  
   const remoteTree = await api('GET', `/repos/${REPO}/git/trees/${baseTree}?recursive=1`);
   const remoteMap = new Map(remoteTree.tree.map((t) => [t.path, t.sha]));
   const localRaw = execSync('git -c core.quotePath=false ls-tree -r HEAD', { cwd: ROOT }).toString();
@@ -53,7 +55,7 @@ async function api(method, urlPath, body) {
     if (!m) continue;
     const [, mode, sha, p] = m;
     if (/\.zip$|\.tar\.gz$|\.log$|node_modules/.test(p)) continue;
-    if (remoteMap.get(p) === sha) continue; // 未变化
+    if (remoteMap.get(p) === sha) continue;
     files.push({ status: remoteMap.has(p) ? 'M' : 'A', path: p, mode });
   }
   console.log(`待推送文件 ${files.length} 个:`);
@@ -102,7 +104,7 @@ async function api(method, urlPath, body) {
   await api('PATCH', `/repos/${REPO}/git/refs/heads/main`, { sha: commit.sha, force: false });
   console.log('✅ main 已更新:', commit.sha);
 
-  // tag 移到新 commit（release 创建时 GitHub 会自动把 tag 指到默认分支 HEAD）
+  
   try {
     await api('PATCH', `/repos/${REPO}/git/refs/tags/${TAG}`, { sha: commit.sha, force: true });
     console.log(`✅ tag ${TAG} 已移到新 commit`);

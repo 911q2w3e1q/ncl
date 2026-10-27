@@ -16,7 +16,6 @@ function t(name, fn) {
   catch (e) { failed++; console.log(`FAIL  ${name}\n      ${e.message}`); }
 }
 
-/* ---------- AI 配置规范化 ---------- */
 t('normalizeAiConfig：默认值与字段清洗', () => {
   const c = analyzer.normalizeAiConfig(null);
   assert.strictEqual(c.baseUrl, 'https://api.openai.com/v1');
@@ -44,7 +43,6 @@ t('normalizeAiConfig：temperature 下限与 maxTokens 上限', () => {
   assert.strictEqual(c.maxTokens, 8000);
 });
 
-/* ---------- 模型输出解析 ---------- */
 t('extractJSON：标准 JSON 直接解析', () => {
   const o = analyzer.extractJSON('{"summary":"内存不足","solutions":[]}');
   assert.strictEqual(o.summary, '内存不足');
@@ -85,7 +83,6 @@ t('normalizeAnalysis：过滤非法动作与非法 risk', () => {
   assert.strictEqual(a.actions.length, 1);
 });
 
-/* ---------- 错误行抽取 ---------- */
 t('extractErrorLines：抓取关键异常行', () => {
   const log = [
     '[INFO] 启动中',
@@ -100,7 +97,6 @@ t('extractErrorLines：抓取关键异常行', () => {
   assert.ok(!hits.some((h) => h.includes('普通日志行')));
 });
 
-/* ---------- 崩溃现场采集 ---------- */
 t('collectCrashContext：收集版本/日志/错误行', () => {
   const ctx = analyzer.collectCrashContext({
     gameDir: os.tmpdir(),
@@ -130,7 +126,6 @@ t('buildPrompt：提示词含动作类型白名单与 JSON 结构要求', () => 
   assert.strictEqual(p[1].role, 'user');
 });
 
-/* ---------- 动作执行：设置类 ---------- */
 t('applyToSettings：setMemory 生效', () => {
   const s = { global: { memory: 2048 }, perVersion: {} };
   fixer.applyToSettings(s, { type: 'setMemory', target: '*', value: '4096' });
@@ -175,7 +170,6 @@ t('applyToSettings：不支持的动作类型被拒', () => {
   assert.throws(() => fixer.applyToSettings(s, { type: 'rmrf', target: '*', value: 'x' }), /不支持的动作类型/);
 });
 
-/* ---------- 动作执行：文件安全 ---------- */
 t('resolveSafePath：拒绝绝对路径', () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'ncl-ai-'));
   assert.throws(() => fixer.resolveSafePath(base, '/etc/passwd'), /只允许相对游戏目录/);
@@ -194,7 +188,6 @@ t('resolveSafePath：允许目录内相对路径', () => {
   assert.ok(p.startsWith(fs.realpathSync(base)) || p.startsWith(base));
 });
 
-/* ---------- applyActions 端到端 ---------- */
 t('applyActions：混合动作成功执行并保存', () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'ncl-ai-'));
   const gameDir = path.join(base, 'game');
@@ -281,7 +274,6 @@ t('rollback：备份不存在时报错', () => {
   assert.throws(() => fixer.rollback('/nonexistent/x.aibak', () => {}), /没有可用的备份/);
 });
 
-/* ---------- 主进程 AI 配置存取 ---------- */
 t('主进程：AI 配置读写往返', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ncl-ai-cfg-'));
   M.setLauncherDir(dir);

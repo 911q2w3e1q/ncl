@@ -1,4 +1,4 @@
-/* 真实启动测试：离线账户 + 1.20.1，在 xvfb 下启动游戏，捕获日志后退出 */
+/* 启动流程测试 */
 'use strict';
 process.env.CUBE_TEST_MODE = '1';
 const ROOT = '/tmp/cube-test';
@@ -12,7 +12,6 @@ core.setGameRoot(ROOT);
 const VER = process.argv[2] || '1.20.1';
 const P = core.paths();
 
-// 准备离线账户与设置（模拟主进程 IPC 的落盘数据）
 const acc = core.offlineLogin('Steve');
 fs.writeFileSync(path.join(P.launcher, 'accounts.json'), JSON.stringify({ accounts: [acc], selectedId: acc.id }, null, 2));
 fs.writeFileSync(path.join(P.launcher, 'settings.json'), JSON.stringify({

@@ -1,14 +1,3 @@
-/* NCL AI 修复动作执行器
- * 负责把模型给出的动作落到真实配置上：
- *  - 改启动器设置（内存 / JVM 参数 / Java 路径 / 分辨率 / 全屏 / 版本隔离 / 服务器地址）
- *  - 写文件（限定在游戏目录内，禁止绝对路径与 .. 逃逸）
- *  - 移除某个 JVM 参数
- *
- * 安全约束：
- *  1. 每次执行前对 settings.json 与目标文件做备份（.aibak），可一键回滚
- *  2. writeFile 的 target 必须是相对路径且解析后仍在游戏目录内
- *  3. 数值类动作做范围校验，非法直接拒绝并回报原因
- */
 'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -21,14 +10,12 @@ const ALLOWED_TYPES = new Set([
   'setFullscreen', 'setIsolation', 'removeJvmArg', 'writeFile', 'setServerAddress',
 ]);
 
-/** 数值动作的合法范围 */
 const NUM_RANGES = {
   setMemory: [256, 65536],
   setWidth: [320, 10000],
   setHeight: [240, 10000],
 };
 
-/** 把动作落到 settings 对象上（不落盘），返回变更描述 */
 function applyToSettings(settings, action) {
   const isGlobal = action.target === '*' || !action.target;
   const scope = isGlobal ? 'global' : 'perVersion';
@@ -101,7 +88,6 @@ function applyToSettings(settings, action) {
   }
 }
 
-/** 校验 writeFile 的目标路径必须落在游戏目录内 */
 function resolveSafePath(gameDir, rel) {
   const p = String(rel || '').trim();
   if (!p) throw new Error('文件路径为空');
@@ -112,11 +98,6 @@ function resolveSafePath(gameDir, rel) {
   return full;
 }
 
-/**
- * 执行一批动作
- * @param {object} opts { actions, settings, gameDir, saveSettings, backupDir }
- * @returns {{ok:boolean, applied:Array, failed:Array, backupPath?:string}}
- */
 function applyActions(opts) {
   const { actions, settings, gameDir } = opts;
   const save = opts.saveSettings;
@@ -128,7 +109,7 @@ function applyActions(opts) {
     return { ok: false, applied, failed: [{ action: null, error: '没有可执行的动作' }] };
   }
 
-  // 备份 settings（写盘前）
+  
   let backupPath = null;
   try {
     if (backupDir) {
@@ -154,12 +135,12 @@ function applyActions(opts) {
         if (Buffer.byteLength(content, 'utf8') > MAX_WRITE_BYTES) {
           throw new Error(`文件内容过大（上限 ${MAX_WRITE_BYTES / 1024}KB）`);
         }
-        // 已存在则先备份
+        
         if (fs.existsSync(full) && backupDir) {
           const rel = path.relative(gameDir, full).replace(/[\\/]/g, '_');
           try {
             fs.copyFileSync(full, path.join(backupDir, `${rel}-${Date.now()}${BACKUP_SUFFIX}`));
-          } catch { /* 备份失败不阻断 */ }
+          } catch {}
         }
         fs.mkdirSync(path.dirname(full), { recursive: true });
         fs.writeFileSync(full, content, 'utf8');
@@ -185,7 +166,6 @@ function applyActions(opts) {
   return { ok: failed.length === 0, applied, failed, backupPath };
 }
 
-/** 从备份回滚设置 */
 function rollback(backupPath, save) {
   if (!backupPath || !fs.existsSync(backupPath)) throw new Error('没有可用的备份');
   const data = JSON.parse(fs.readFileSync(backupPath, 'utf8'));

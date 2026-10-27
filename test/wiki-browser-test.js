@@ -1,6 +1,6 @@
-/* Wiki 站内百科（内嵌 webview）冒烟测试
- * 用法：xvfb-run -a node_modules/.bin/electron --no-sandbox test/wiki-browser-test.js
- */
+/* Wiki 内嵌浏览器测试
+ *
+ * 用法：xvfb-run -a node_modules/.bin/electron --no-sandbox test/wiki-browser-test.js */
 'use strict';
 
 const { app, BrowserWindow } = require('electron');
@@ -27,7 +27,7 @@ app.whenReady().then(async () => {
   await win.loadFile(path.join(ROOT, 'renderer', 'index.html'));
   await sleep(2500);
 
-  // 切到 Wiki 页
+  
   await win.webContents.executeJavaScript(`
     (() => {
       const navs = [...document.querySelectorAll('[data-page], .nav-item, .tab')];
@@ -38,7 +38,7 @@ app.whenReady().then(async () => {
   await sleep(1200);
   check('Wiki 页已打开', await win.webContents.executeJavaScript('!document.getElementById("page-wiki").hidden'));
 
-  // 点第二个版本 → 简略视图，再点「查看详细资料」→ 详细视图
+  
   await win.webContents.executeJavaScript(`
     (() => {
       const items = [...document.querySelectorAll('#wiki-list .wiki-item')];
@@ -54,7 +54,7 @@ app.whenReady().then(async () => {
   const inDetail = await win.webContents.executeJavaScript('!document.getElementById("wiki-detail").hidden');
   check('进入详细资料视图', inDetail);
 
-  // 等 webview 加载（反爬挑战 + 页面渲染，要十几秒）
+  
   await sleep(15000);
 
   const state = await win.webContents.executeJavaScript(`
@@ -73,7 +73,7 @@ app.whenReady().then(async () => {
   check('webview 区块可见', state.visible);
   check('指向中文 wiki', /zh\.minecraft\.wiki/.test(state.src || ''), state.src);
 
-  // 读 webview 内的实际内容，确认是中文
+  
   const inner = await win.webContents.executeJavaScript(`
     (async () => {
       const v = document.getElementById('wd-browser-view');

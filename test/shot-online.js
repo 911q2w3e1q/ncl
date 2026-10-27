@@ -1,7 +1,4 @@
-/* 联机页截图：Electron + xvfb
- * 用法：xvfb-run -a node_modules/.bin/electron --no-sandbox test/shot-online.js
- * 产出：docs/NCL界面-联机页.png
- */
+/* 联机页截图 */
 'use strict';
 
 const { app, BrowserWindow } = require('electron');
@@ -24,13 +21,13 @@ app.whenReady().then(async () => {
   await win.loadFile(path.join(ROOT, 'renderer', 'index.html'));
   await sleep(2000);
 
-  // 打开联机页
+  
   await win.webContents.executeJavaScript(`
     (() => { document.querySelector('.nav-item[data-page="online"]').click(); return true; })()
   `);
   await sleep(1200);
 
-  // 模拟：填端口、跑一次隧道拿到公网地址（mock 模式下直接返回示例地址）
+  
   await win.webContents.executeJavaScript(`
     (async () => {
       document.getElementById('on-port-input').value = '51234';

@@ -1,5 +1,4 @@
-/* 更新器 / Wiki 官方补丁 / 内存钳制 测试
- * 覆盖：semverCmp、platformAssetRe、sanitizeWikiHtml（XSS 白名单）、safeMemoryMB、wikiPatchNotes（缓存注入） */
+/* 更新器与 Wiki 测试 */
 'use strict';
 process.env.CUBE_TEST_MODE = '1';
 process.env.CUBE_LAUNCHER_ROOT = process.env.CUBE_LAUNCHER_ROOT || '/tmp/cube-test';
@@ -15,7 +14,6 @@ function t(name, fn) {
   catch (e) { console.log('  ✗', name, '\n     ', e.message); fail++; }
 }
 
-/* ---------- semverCmp ---------- */
 t('semver: 1.2.0 > 1.1.0', () => assert.ok(M.semverCmp('1.2.0', '1.1.0') > 0));
 t('semver: v 前缀等价', () => assert.strictEqual(M.semverCmp('v1.2.0', '1.2.0'), 0));
 t('semver: 1.2.10 > 1.2.9（数值而非字典序）', () => assert.ok(M.semverCmp('1.2.10', '1.2.9') > 0));
@@ -23,7 +21,6 @@ t('semver: 1.10.0 > 1.9.9（次位进位）', () => assert.ok(M.semverCmp('1.10.
 t('semver: 1.0.0 < 1.0.1', () => assert.ok(M.semverCmp('1.0.0', '1.0.1') < 0));
 t('semver: 2.0.0 > 1.99.99', () => assert.ok(M.semverCmp('2.0.0', '1.99.99') > 0));
 
-/* ---------- platformAssetRe（桩平台后还原） ---------- */
 const realPlatform = process.platform, realArch = process.arch;
 function withPlatform(platform, arch, fn) {
   Object.defineProperty(process, 'platform', { value: platform, configurable: true });
@@ -57,7 +54,6 @@ t('assetRe: macOS arm64 / x64 分流', () => {
   });
 });
 
-/* ---------- sanitizeWikiHtml ---------- */
 const S = M.sanitizeWikiHtml;
 t('sanitize: 删除 script 整块', () => {
   const out = S('<p>安全</p><script>alert(1)</script><p>内容</p>');
@@ -113,7 +109,6 @@ t('sanitize: 空输入安全', () => {
   assert.strictEqual(S(''), '');
 });
 
-/* ---------- safeMemoryMB ---------- */
 t('memory: 0/未设置走默认 2048', () => {
   assert.strictEqual(M.safeMemoryMB(0), 2048);
   assert.strictEqual(M.safeMemoryMB(undefined), 2048);
@@ -132,7 +127,6 @@ t('memory: 正常值原样通过', () => {
   assert.strictEqual(M.safeMemoryMB(4096), 4096);
 });
 
-/* ---------- wikiPatchNotes（注入本地缓存，确定性强） ---------- */
 (async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ncl-wiki-test-'));
   const gameTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ncl-wiki-game-'));

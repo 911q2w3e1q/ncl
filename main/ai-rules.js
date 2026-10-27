@@ -1,19 +1,5 @@
-/* NCL 崩溃规则引擎（本地模式专用）
- *
- * 背景：
- *   启动器内置的小模型（135M ~ 0.5B）能力有限，中文表达常常跑偏、
- *   复述提示词甚至重复。但真正有价值的诊断信息其实高度结构化：
- *   堆栈里的异常类型、JVM 参数、Java 版本、模组加载器状态等。
- *
- * 因此本地模式采用「规则优先 + 模型补充」：
- *   1. 先用确定性规则从崩溃现场提取原因与可执行修复动作（可靠、可直接执行）
- *   2. 再把小模型的自由文本作为「模型补充意见」附在后面（仅供参考）
- *
- * 这样即使模型很笨，用户拿到的仍然是一份可用的分析报告。
- */
 'use strict';
 
-/** 规则表：每条规则给出「命中条件 → 原因 → 解决方案 → 可执行动作」 */
 const RULES = [
   {
     id: 'oom',
@@ -122,7 +108,7 @@ const RULES = [
   {
     id: 'exit_code',
     test: /exitCode|退出码/,
-    fallback: true,   // 仅在没有其他规则命中时才用
+    fallback: true,
     title: '游戏进程异常退出',
     detail: '进程没有正常走完退出流程就被终止，常见于内存不足或原生库崩溃。',
     solutions: [
@@ -131,11 +117,6 @@ const RULES = [
   },
 ];
 
-/**
- * 从崩溃现场跑规则引擎
- * @param {object} ctx 崩溃现场（collectCrashContext 的输出）
- * @returns {{matched:boolean, causes:Array, solutions:Array, actions:Array, summary:string}}
- */
 function analyzeByRules(ctx) {
   const text = [
     ...(ctx.errorLines || []),
@@ -156,7 +137,7 @@ function analyzeByRules(ctx) {
     seen.add(rule.id);
     const bucket = rule.fallback ? fallbacks : causes;
     bucket.push({ title: rule.title, detail: rule.detail });
-    if (rule.fallback) continue;   // 兜底规则只出标题，不带解决方案
+    if (rule.fallback) continue;
     for (const s of rule.solutions || []) {
       solutions.push({
         title: s.title,
@@ -173,7 +154,7 @@ function analyzeByRules(ctx) {
     }
   }
 
-  // 没有具体规则命中时，才用兜底规则
+  
   if (!causes.length && fallbacks.length) {
     causes.push(...fallbacks);
     solutions.push({
@@ -184,7 +165,7 @@ function analyzeByRules(ctx) {
     });
   }
 
-  // 通用兜底：内存参数过小
+  
   const jvmArgs = (ctx.settings && ctx.settings.jvmArgs) || '';
   const memMatch = /-Xmx(\d+)/.exec(jvmArgs);
   if (memMatch && parseInt(memMatch[1], 10) < 2048 && !seen.has('oom')) {

@@ -1,6 +1,4 @@
-/* Modrinth 覆盖率回归测试：验证删掉 CurseForge 来源后，主流模组在 Modrinth 均可搜到
- * 已知例外（作者选择不在 Modrinth 发布）：Twilight Forest、OptiFine —— 通过「本地导入」覆盖
- * 搜索词带弯引号（’）时 API 会搜偏，故本测试同时验证规范化后的命中（对应 renderer.js 的 query 规范化） */
+/* AI 规则覆盖率测试 */
 'use strict';
 process.env.CUBE_TEST_MODE = '1';
 process.env.CUBE_LAUNCHER_ROOT = '/tmp/cube-dl-test';
@@ -8,11 +6,9 @@ process.env.CUBE_LAUNCHER_ROOT = '/tmp/cube-dl-test';
 const core = require('/workspace/NCL/main/main.js');
 const assert = require('assert');
 
-// 规范化：忽略大小写、空格、连字符、各类引号（与前端 query 规范化对应）
 const norm = (s) => String(s || '').toLowerCase().replace(/[\s\-_'’‘"“”]/g, '');
 const normalizeQuery = (q) => q.replace(/[’‘]/g, "'").replace(/[“”]/g, '"');
 
-// [搜索词, 期望命中关键词] —— 全部为 Modrinth 上确认存在本体的主流模组
 const PROBES = [
   ['JEI', 'jei'], ['Create', 'create'], ['Sodium', 'sodium'], ['Iris', 'iris'],
   ['Fabric API', 'fabricapi'], ['JourneyMap', 'journeymap'], ["Xaero's Minimap", 'xaerosminimap'],
@@ -23,7 +19,7 @@ const PROBES = [
   ['Waystones', 'waystones'], ['Sophisticated Backpacks', 'sophisticatedbackpacks'], ['Chipped', 'chipped'],
   ['Every Compat', 'everycompat'], ['TerraBlender', 'terrablender'], ['Controlling', 'controlling'],
   ['Mod Menu', 'modmenu'], ['3D Skin Layers', '3dskinlayers'], ['Vivecraft', 'vivecraft'],
-  // 带弯引号的名称（复制的常见形态）：规范化后本体应进前 5
+  
   ['Farmer’s Delight', 'farmersdelight'], ['Alex’s Mobs', 'alexsmobs'], ['Nature’s Compass', 'naturescompass'],
   ['Xaero’s World Map', 'xaerosworldmap'], ['Oh The Biomes You’ll Go', 'ohthebiomes'],
 ];

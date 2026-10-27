@@ -1,33 +1,10 @@
-/* NCL 本地 AI 模型管理（主进程侧）
- *
- * 职责：
- *  1. 内置「小模型」目录（体积优先，能塞进启动器磁盘 footprint）
- *  2. 从HF 镜像按需下载模型文件到 <launcher>/ai-models/<repo>/...
- *  3. 汇报下载进度（供渲染层显示进度条）
- *  4. 提供本地文件字节读取（渲染层推理时通过 IPC 拿模型分片）
- *
- * 设计要点：
- *  - 推理本身跑在渲染进程（Electron = Chromium，onnxruntime-web WASM 可用；
- *    主进程是 Node，onnxruntime-web 的 blob: loader 在 Node 下不可用）
- *  - 模型文件落盘后不重复下载；下载中断用 .part 临时文件，重启后可续传重下
- *  - 目录结构与 HuggingFace 一致（repo/ + onnx/ 子目录），渲染层按同一规则解析
- */
 'use strict';
 
 const fs = require('fs');
 const path = require('path');
 
-/* ---------------- 模型目录 ---------------- */
-
-/** HF 镜像（huggingface.co 在部分网络环境不可达） */
 const HF_MIRROR = 'https://hf-mirror.com';
 
-/**
- * 内置候选模型（体积从小到大）
- *  - files：需要下载的文件（相对 repo 根）
- *  - size：预估总体积（字节），仅用于 UI 展示
- *  - params：参数量描述
- */
 const LOCAL_MODELS = [
   {
     id: 'smollm2-135m',
@@ -68,26 +45,18 @@ const LOCAL_MODELS = [
   },
 ];
 
-/** 按 id 取模型定义 */
 function getModelDef(id) {
   return LOCAL_MODELS.find((m) => m.id === id) || null;
 }
 
-/* ---------------- 路径 ---------------- */
-
-/** 模型根目录：<launcher>/ai-models */
 function modelsRoot(launcherDir) {
   return path.join(launcherDir, 'ai-models');
 }
 
-/** 单个模型的本地目录：<launcher>/ai-models/<repo> */
 function modelDir(launcherDir, repo) {
   return path.join(modelsRoot(launcherDir), ...repo.split('/'));
 }
 
-/* ---------------- 状态 ---------------- */
-
-/** 检查模型是否已完整下载（所有 files 都在且非空） */
 function isModelInstalled(launcherDir, def) {
   const dir = modelDir(launcherDir, def.repo);
   for (const f of def.files) {
@@ -99,18 +68,16 @@ function isModelInstalled(launcherDir, def) {
   return true;
 }
 
-/** 模型已下载部分的字节数（用于显示进度） */
 function installedBytes(launcherDir, def) {
   const dir = modelDir(launcherDir, def.repo);
   let n = 0;
   for (const f of def.files) {
     const p = path.join(dir, ...f.split('/'));
-    try { if (fs.existsSync(p)) n += fs.statSync(p).size; } catch { /* 忽略 */ }
+    try { if (fs.existsSync(p)) n += fs.statSync(p).size; } catch {}
   }
   return n;
 }
 
-/** 列出全部候选模型 + 本地安装状态 */
 function listModels(launcherDir) {
   return LOCAL_MODELS.map((def) => {
     const installed = isModelInstalled(launcherDir, def);
@@ -128,48 +95,40 @@ function listModels(launcherDir) {
   });
 }
 
-/* ---------------- 下载 ---------------- */
-
 function ensureDir(dir) {
-  try { fs.mkdirSync(dir, { recursive: true }); } catch { /* 忽略 */ }
+  try { fs.mkdirSync(dir, { recursive: true }); } catch {}
 }
 
-/**
- * 下载模型全部文件
- * @param {string} launcherDir 启动器数据目录
- * @param {string} modelId模型 id
- * @param {(p:{loaded:number,total:number,file:string,percent:number})=>void} onProgress
- */
 async function downloadModel(launcherDir, modelId, onProgress) {
   const def = getModelDef(modelId);
   if (!def) throw new Error(`未知模型：${modelId}`);
   const dir = modelDir(launcherDir, def.repo);
   ensureDir(dir);
 
-  // 总体积（用目录里已知大小估算，便于画进度条）
+  
   const total = def.size;
 
   let loaded = 0;
   for (const f of def.files) {
     const dest = path.join(dir, ...f.split('/'));
     const rel = f.split('/').join('/');
-    // 已存在则跳过（计入已加载字节）
+    
     try {
       if (fs.existsSync(dest) && fs.statSync(dest).size > 0) {
         loaded += fs.statSync(dest).size;
         if (onProgress) onProgress({ loaded, total, file: rel, percent: percent(loaded, total) });
         continue;
       }
-    } catch { /* 忽略 */ }
+    } catch {}
 
     const url = `${HF_MIRROR}/${def.repo}/resolve/main/${rel}`;
     ensureDir(path.dirname(dest));
     await downloadWithProgress(url, dest, (n) => {
-      // 用「已完成文件字节 + 当前文件已下载字节」估算总进度
+      
       const done = loaded + n;
       if (onProgress) onProgress({ loaded: done, total, file: rel, percent: percent(done, total) });
     });
-    try { loaded += fs.statSync(dest).size; } catch { /* 忽略 */ }
+    try { loaded += fs.statSync(dest).size; } catch {}
   }
 
   if (!isModelInstalled(launcherDir, def)) throw new Error('模型文件不完整，下载未成功');
@@ -181,7 +140,6 @@ function percent(loaded, total) {
   return Math.max(0, Math.min(100, Math.round((loaded / total) * 100)));
 }
 
-/** 带进度的单文件下载（流式写盘 + .part 临时文件） */
 async function downloadWithProgress(url, dest, onBytes) {
   const tmp = dest + '.part';
   try {
@@ -201,12 +159,11 @@ async function downloadWithProgress(url, dest, onBytes) {
     fs.renameSync(tmp, dest);
     return dest;
   } catch (e) {
-    try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch { /* 忽略 */ }
+    try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch {}
     throw e;
   }
 }
 
-/** 删除已下载模型 */
 function removeModel(launcherDir, modelId) {
   const def = getModelDef(modelId);
   if (!def) throw new Error(`未知模型：${modelId}`);
@@ -219,14 +176,6 @@ function removeModel(launcherDir, modelId) {
   }
 }
 
-/* ---------------- 供渲染层读取模型字节 ---------------- */
-
-/**
- * 读取模型目录下某个文件的字节（base64 传输，方便 IPC）
- * @param {string} launcherDir
- * @param {string} repo模型 repo
- * @param {string} rel 相对路径，如 onnx/model_q4f16.onnx
- */
 function readModelFile(launcherDir, repo, rel) {
   const dir = modelDir(launcherDir, repo);
   const safe = String(rel || '').split('/').filter((s) => s && s !== '.' && s !== '..');
@@ -237,7 +186,6 @@ function readModelFile(launcherDir, repo, rel) {
   return { rel: safe.join('/'), base64: buf.toString('base64'), size: buf.length };
 }
 
-/** 模型是否已就绪 */
 function modelReady(launcherDir, modelId) {
   const def = getModelDef(modelId);
   if (!def) return false;

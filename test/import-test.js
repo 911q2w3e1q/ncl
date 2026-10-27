@@ -1,5 +1,4 @@
-/* 本地整合包导入测试：构造最小 .mrpack → installModpack(source=local) → 验证全链路
- * 覆盖场景：CurseForge 等站外整合包下载后导入 NCL（补 Modrinth 整合包之外的缺口） */
+/* 本地整合包导入测试 */
 'use strict';
 process.env.CUBE_TEST_MODE = '1';
 process.env.CUBE_LAUNCHER_ROOT = '/tmp/cube-import-test';
@@ -13,7 +12,7 @@ const AdmZip = require('/workspace/NCL/node_modules/adm-zip');
 (async () => {
   core.setGameRoot(process.env.CUBE_LAUNCHER_ROOT);
 
-  // 构造最小合法 .mrpack（Modrinth 整合包格式：索引 + overrides）
+  
   const zip = new AdmZip();
   zip.addFile('modrinth.index.json', Buffer.from(JSON.stringify({
     formatVersion: 1, name: 'NCL Import Test', versionId: '1.0.0',
@@ -34,7 +33,7 @@ const AdmZip = require('/workspace/NCL/node_modules/adm-zip');
   assert.ok(fs.existsSync(path.join(process.env.CUBE_LAUNCHER_ROOT, 'versions', '1.20.1', '1.20.1.json')), '基础版本 JSON 应已安装');
   console.log(`✓ 本地整合包导入: 基础 ${r.mc} + ${r.fabricVersionId} · overrides 解压正常 · 阶段: ${stages.join('→')}`);
 
-  // 非法来源应被拒绝
+  
   await assert.rejects(() => core.installModpack({ source: 'curseforge' }, () => {}), /手动导入/);
   console.log('✓ 非法来源整合包被拒绝并提示手动导入');
 

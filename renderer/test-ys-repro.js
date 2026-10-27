@@ -1,18 +1,15 @@
-/* LittleSkin 登录崩溃复现脚本
- * 结构：mock Yggdrasil 服务器 + 静态 serve renderer/ + 忠实 window.cube stub
- * 目标：复现「登录失败：Cannot set properties of null (setting 'textContent')」并抓调用栈
- */
+
+
 'use strict';
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
 
-/* ---------- 1. mock Yggdrasil 服务器 ---------- */
 const YS_PORT = 38171;
 const ysServer = http.createServer((req, res) => {
   const url = new URL(req.url, `http://127.0.0.1:${YS_PORT}`);
-  // CORS：stub 在渲染进程跑 fetch，需要跨端口许可
+  
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -21,7 +18,7 @@ const ysServer = http.createServer((req, res) => {
     res.writeHead(code, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(obj));
   };
-  // 读 body
+  
   let body = '';
   req.on('data', (c) => (body += c));
   req.on('end', () => {
@@ -38,7 +35,7 @@ const ysServer = http.createServer((req, res) => {
       return json({ error: 'ForbiddenOperationException', errorMessage: '用户名或密码错误' }, 403);
     }
     if (req.method === 'GET' && url.pathname === '/api/user/properties') {
-      // 签名验证：clientToken/accessToken 头
+      
       const auth = req.headers.authorization || '';
       if (!auth.includes('mock-access-token-001')) {
         return json({ error: 'UnauthorizedException', errorMessage: '无效的会话' }, 401);
@@ -59,7 +56,6 @@ const ysServer = http.createServer((req, res) => {
   });
 });
 
-/* ---------- 2. 静态 serve renderer/ ---------- */
 const WEB_PORT = 38172;
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.svg': 'image/svg+xml' };
 const webServer = http.createServer((req, res) => {
@@ -71,7 +67,6 @@ const webServer = http.createServer((req, res) => {
   res.end(fs.readFileSync(p));
 });
 
-/* ---------- 3. 忠实 window.cube stub（模拟主进程行为） ---------- */
 function buildCubeStub() {
   const listeners = {};
   const state = {
@@ -85,7 +80,7 @@ function buildCubeStub() {
     running: false,
   };
   const emit = (ch, p) => (listeners[ch] || []).forEach((cb) => cb(p));
-  // yggdrasilLogin 核心逻辑复刻自主进程
+  
   async function yggdrasilLogin({ apiRoot, username, password }) {
     const clientToken = 'mock-client-token';
     const authRes = await fetch(`${apiRoot}/authserver/authenticate`, {
@@ -99,7 +94,7 @@ function buildCubeStub() {
     }
     const auth = await authRes.json();
     const profile = auth.selectedProfile;
-    // 拉取皮肤属性
+    
     let skinUrl = null, model = 'default';
     try {
       const propRes = await fetch(`${apiRoot}/api/user/properties`, { headers: { Authorization: `Bearer ${auth.accessToken}` } });
@@ -114,7 +109,8 @@ function buildCubeStub() {
           }
         }
       }
-    } catch { /* 皮肤拉取失败不阻塞登录 */ }
+    } catch { 
+ }
     return { id: 'ys-' + profile.id, type: 'yggdrasil', name: profile.name, uuid: profile.id, apiRoot, accessToken: auth.accessToken, clientToken, skinUrl, model };
   }
   const invoke = async (ch, ...args) => {
@@ -124,7 +120,7 @@ function buildCubeStub() {
       case 'wiki:versionInfo': return { ok: true, info: { id: args[0], type: 'release', releaseTime: '2023-06-12', installed: true, fabric: false, javaMajor: 17, assetIndex: args[0], mainClass: 'net.minecraft.client.main.Main', clientSha1: 'a'.repeat(40), jarSize: 23456789, inheritsFrom: null, wikiUrl: 'https://minecraft.wiki/w/' + args[0] } };
       case 'wiki:patchNotes': return { ok: true, notes: { found: false } };
       case 'skin:fetch': {
-        // 复刻主进程 fetchSkinDataURL：拉 url 转 dataURL
+        
         const url = args[0];
         const r = await fetch(url);
         const buf = Buffer.from(await r.arrayBuffer());
@@ -177,14 +173,15 @@ function buildCubeStub() {
   page.on('pageerror', (e) => errors.push({ type: 'pageerror', message: e.message, stack: e.stack }));
   page.on('console', (m) => { if (m.type() === 'error') errors.push({ type: 'console', message: m.text(), stack: '' }); });
 
-  await page.evaluateOnNewDocument(() => { /* stub 由下方 addScriptTag 注入 */ });
-  // 用 evaluateOnNewDocument 注入 stub（先于 renderer.js 执行，port 已内联）
+  await page.evaluateOnNewDocument(() => { 
+ });
+  
   const stubSrc = fs.readFileSync(path.join(__dirname, 'test-ys-stub.js'), 'utf8').replace(/__YS_PORT__/g, String(YS_PORT));
   await page.evaluateOnNewDocument(stubSrc);
 
   await page.goto(`http://127.0.0.1:${WEB_PORT}/index.html`, { waitUntil: 'networkidle0' });
   await sleep(600);
-  // 诊断：页面状态
+  
   console.log('== 诊断:', JSON.stringify(await page.evaluate(() => ({
     cube: typeof window.cube,
     refresh: typeof window.refresh,
@@ -194,12 +191,12 @@ function buildCubeStub() {
     toast: (document.getElementById('toast') || {}).textContent || null,
   }))));
 
-  // 打开账户弹窗 → LittleSkin tab → 填表 → 登录
+  
   await page.$eval('#btn-account', (el) => el.click());
   await sleep(200);
   await page.$eval('.mtab[data-atab="littleskin"]', (el) => el.click());
   await sleep(100);
-  // 清空再输入（输入框带默认值）
+  
   for (const sel of ['#ys-api', '#ys-user', '#ys-pass']) {
     await page.$eval(sel, (el) => { el.value = ''; });
   }
@@ -209,7 +206,7 @@ function buildCubeStub() {
   await page.$eval('#btn-ys-login', (el) => el.click());
   await sleep(1500);
 
-  // 直接调页面里的 refresh() 抓底层空引用的完整调用栈
+  
   const refreshStack = await page.evaluate(async () => {
     try { await window.refresh(); return null; }
     catch (e) { return e.stack || String(e); }

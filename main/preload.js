@@ -1,4 +1,3 @@
-/* preload：向渲染层暴露受控 API */
 'use strict';
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
@@ -32,7 +31,8 @@ contextBridge.exposeInMainWorld('cube', {
     if (!EVENT_CHANNELS.has(channel)) throw new Error(`非法事件: ${channel}`);
     ipcRenderer.on(channel, (_e, ...a) => cb(...a));
   },
-  /* 拖拽导入：把浏览器 File 对象转换回真实磁盘路径 */
+  
+
   getPathForFile(file) {
     try { return webUtils.getPathForFile(file); } catch { return null; }
   },

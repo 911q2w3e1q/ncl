@@ -1,5 +1,5 @@
 /* NCL.exe — Nexus Craft Launcher 启动器（MinGW 编译，无控制台窗口）
- * 职责：找到同目录下的 engine\electron.exe 并启动它。
+ * 职责：找到同目录下的 engine\NCL.exe 并启动它。
  * 真正的 Electron 运行时与应用代码全部在 engine\ 文件夹内，
  * 顶层只保留这一个 NCL.exe，界面清爽。 */
 #include <windows.h>
@@ -13,11 +13,11 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, PWSTR cmdLine, int nShow) 
     wchar_t *slash = wcsrchr(exeDir, L'\\');
     if (slash) *(slash + 1) = L'\0';
     StringCchPrintfW(engineDir, MAX_PATH, L"%sengine", exeDir);
-    StringCchPrintfW(target, MAX_PATH, L"%s\\electron.exe", engineDir);
+    StringCchPrintfW(target, MAX_PATH, L"%s\\NCL.exe", engineDir);
 
     if (GetFileAttributesW(target) == INVALID_FILE_ATTRIBUTES) {
         MessageBoxW(NULL,
-            L"未找到 engine\\electron.exe。\n\n"
+            L"未找到 engine\\NCL.exe。\n\n"
             L"请保持 NCL.exe 与 engine 文件夹处于同一目录，\n"
             L"不要把 NCL.exe 单独移走。",
             L"NCL — Nexus Craft Launcher", MB_OK | MB_ICONERROR);

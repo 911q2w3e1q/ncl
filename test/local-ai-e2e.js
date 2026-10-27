@@ -1,7 +1,4 @@
-/* 本地 AI 端到端测试（Electron）
- * 用法：xvfb-run -a node_modules/.bin/electron --no-sandbox test/local-ai-e2e.js
- * 流程：启动本地模型 HTTP 服务 → 打开隐藏推理窗口 → 请求生成 → 打印结果
- */
+/* 本地 AI 端到端测试 */
 'use strict';
 
 const { app } = require('electron');
@@ -50,7 +47,7 @@ app.whenReady().then(async () => {
     console.log('[TEST] 输出：\n' + res.text);
     console.log('[TEST] 原始：\n' + (res.raw || '(无)'));
 
-    // 验证「规则引擎 + 模型文本」合并后的完整分析结果
+    
     const aiAnalyzer = require(path.join(ROOT, 'main', 'ai-analyzer'));
     const merged = await aiAnalyzer.analyzeCrash(
       { mode: 'local', localModelId: 'smollm2-135m', enabled: true, temperature: 0.3 },

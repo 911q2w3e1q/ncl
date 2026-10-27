@@ -1,8 +1,4 @@
-/* 加载器下载界面截图（Electron 本体 + xvfb）
- *
- * 用法：xvfb-run -a node_modules/.bin/electron --no-sandbox test/shot-loader.js
- * 产出：docs/NCL界面-加载器下载-Fabric.png 等
- */
+/* 加载器弹窗截图 */
 'use strict';
 
 const { app, BrowserWindow } = require('electron');
@@ -32,7 +28,7 @@ app.whenReady().then(async () => {
   await win.loadFile(path.join(ROOT, 'renderer', 'index.html'));
   await sleep(2000);
 
-  // 切到下载页
+  
   await win.webContents.executeJavaScript(`
     (() => {
       const navs = [...document.querySelectorAll('[data-page], .nav-item, .tab')];
@@ -44,7 +40,7 @@ app.whenReady().then(async () => {
   `);
   await sleep(1200);
 
-  // 取下载列表第一项（原版游戏）的真实版本号，不写死
+  
   const mc = await win.webContents.executeJavaScript(`
     (() => {
       const first = document.querySelector('#dl-items .dl-item');

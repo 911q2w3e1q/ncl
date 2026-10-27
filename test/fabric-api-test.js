@@ -1,6 +1,4 @@
-/* Fabric API 安装模块单元测试
- * 用法：node test/fabric-api-test.js
- */
+/* Fabric API 安装测试 */
 'use strict';
 
 const assert = require('assert');
@@ -16,12 +14,10 @@ function check(name, cond) {
   else { fail++; console.log('  ✗', name); }
 }
 
-/** 假 fetchJSON：返回固定结构的 fabric-api 版本列表 */
 function fakeFetch(versions) {
   return async () => versions;
 }
 
-/** 假 downloadFile：写一个假 jar 文件 */
 function fakeDownload(records) {
   return async (url, dest, opts) => {
     records.push({ url, dest });
@@ -34,7 +30,7 @@ function fakeDownload(records) {
 (async () => {
   console.log('Fabric API 安装测试');
 
-  // 1) 版本列表排序（新→旧）
+  
   {
     const raw = [
       { id: 'old', version_number: '0.1.0', date_published: '2024-01-01T00:00:00Z', files: [] },
@@ -45,7 +41,7 @@ function fakeDownload(records) {
     check('版本号字段正确', list[0].versionNumber === '0.2.0');
   }
 
-  // 2) 正常安装：primary 文件优先，落到 mods 目录
+  
   {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ncl-fapi-'));
     const recs = [];
@@ -64,7 +60,7 @@ function fakeDownload(records) {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 
-  // 3) 无可用版本 → 跳过而不抛错（不阻断加载器安装）
+  
   {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ncl-fapi-'));
     const r = await installFabricApi('99.9.9', tmp, () => {}, fakeFetch([]), fakeDownload([]));
@@ -72,7 +68,7 @@ function fakeDownload(records) {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 
-  // 4) 该 MC 版本没有 primary 文件 → 也走降级（取第一个文件）
+  
   {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ncl-fapi-'));
     const recs = [];
@@ -86,7 +82,7 @@ function fakeDownload(records) {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 
-  // 5) 进度回调被调用
+  
   {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ncl-fapi-'));
     const prog = [];

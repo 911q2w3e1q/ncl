@@ -1,32 +1,19 @@
-/* NCL AI 报错分析模块
- * 职责：
- *  1. 采集游戏崩溃现场（crash-reports 目录 / 最后日志 / 版本与运行环境信息）
- *  2. 调用 OpenAI 兼容接口（/chat/completions）让模型分析原因并给出修复动作
- *  3. 把模型返回的动作交给受控执行器落地（可改配置文件 / 设置 / JVM 参数）
- *
- * 设计要点：
- *  - 兼容任何 OpenAI 格式的接口（OpenAI / DeepSeek / 智谱 / 硅基流动 / Ollama 的 v1 兼容层）
- *  - 模型被要求输出严格 JSON；解析失败时降级为纯文本展示，不阻塞用户
- *  - 动作执行前一律备份原文件，失败可回滚
- */
 'use strict';
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { analyzeByRules } = require('./ai-rules');
 
-/* ---------------- 配置 ---------------- */
-
 const AI_DEFAULTS = {
   enabled: false,
-  mode: 'cloud',        // 'cloud' = 云端 API（需 Key）；'local' = 启动器内置小模型（免 Key）
+  mode: 'cloud',
   baseUrl: 'https://api.openai.com/v1',
   apiKey: '',
   model: 'gpt-4o-mini',
   localModelId: 'smollm2-135m',
   temperature: 0.2,
   maxTokens: 2000,
-  autoAnalyze: true, // 游戏崩溃退出后自动分析
+  autoAnalyze: true,
 };
 
 function normalizeAiConfig(raw) {
@@ -39,20 +26,17 @@ function normalizeAiConfig(raw) {
   c.localModelId = String(c.localModelId || AI_DEFAULTS.localModelId).trim();
   c.temperature = Number.isFinite(+c.temperature) ? Math.max(0, Math.min(2, +c.temperature)) : AI_DEFAULTS.temperature;
   c.maxTokens = Math.max(256, Math.min(8000, parseInt(c.maxTokens, 10) || AI_DEFAULTS.maxTokens));
-  // enabled：显式传入时以其为准；未传入时按「有 Key 或选了本地模型」推断
+  
   const usable = c.mode === 'local' ? !!c.localModelId : !!c.apiKey;
   c.enabled = input.enabled === undefined ? usable : (!!input.enabled && usable);
   c.autoAnalyze = input.autoAnalyze === undefined ? AI_DEFAULTS.autoAnalyze : !!input.autoAnalyze;
   return c;
 }
 
-/* ---------------- 崩溃现场采集 ---------------- */
-
-const CRASH_FILE_LIMIT = 60 * 1024;   // 单个崩溃报告最多读 60KB
-const LOG_TAIL_LINES = 220;           // 日志尾部行数
+const CRASH_FILE_LIMIT = 60 * 1024;
+const LOG_TAIL_LINES = 220;
 const LOG_TAIL_MAX = 40 * 1024;
 
-/** 列出 crash-reports 目录下最新的崩溃报告 */
 function listCrashReports(gameDir) {
   const dir = path.join(gameDir, 'crash-reports');
   if (!fs.existsSync(dir)) return [];
@@ -74,7 +58,6 @@ function readTail(file, maxBytes) {
   } catch { return ''; }
 }
 
-/** 从日志文本里抽取关键错误行 */
 function extractErrorLines(text) {
   const lines = String(text || '').split(/\r?\n/);
   const hit = [];
@@ -85,10 +68,6 @@ function extractErrorLines(text) {
   return hit.slice(-40);
 }
 
-/**
- * 采集完整崩溃上下文
- * @param {object} ctx { gameDir, versionId, versionJSON, settings, logTail, exitCode, signal }
- */
 function collectCrashContext(ctx) {
   const { gameDir, versionId, versionJSON, settings, logTail, exitCode, signal } = ctx || {};
   const reports = listCrashReports(gameDir);
@@ -118,14 +97,11 @@ function collectCrashContext(ctx) {
   };
 }
 
-/* ---------------- 调用模型 ---------------- */
-
-/** 组装提示词：要求模型输出严格 JSON */
 function buildPrompt(ctx, localMode) {
   const payload = JSON.stringify(ctx, null, 2);
   if (localMode) {
-    // 小模型能力有限，要求过细的 JSON 结构基本不可能稳定满足，
-    // 改为「短句 + 要点」的宽松格式，再由 normalizeAnalysis 兜底成结构化结果
+    
+    
     return [
       {
         role: 'system',
@@ -200,7 +176,6 @@ function buildPrompt(ctx, localMode) {
   ];
 }
 
-/** 从模型返回文本中抠出 JSON（容错：去掉 ``` 包裹、前后废话） */
 function extractJSON(text) {
   let s = String(text || '').trim();
   const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
@@ -211,7 +186,6 @@ function extractJSON(text) {
   try { return JSON.parse(s); } catch { return null; }
 }
 
-/** 调 OpenAI 兼容 /chat/completions */
 async function callModel(cfg, messages) {
   const url = `${cfg.baseUrl}/chat/completions`;
   const controller = new AbortController();
@@ -235,7 +209,7 @@ async function callModel(cfg, messages) {
     const text = await res.text();
     if (!res.ok) {
       let detail = text.slice(0, 400);
-      try { detail = JSON.parse(text).error?.message || detail; } catch { /* 非 JSON */ }
+      try { detail = JSON.parse(text).error?.message || detail; } catch {}
       throw new Error(`模型接口返回 HTTP ${res.status}：${detail}`);
     }
     let json;
@@ -251,7 +225,6 @@ async function callModel(cfg, messages) {
   }
 }
 
-/** 规范化模型输出，保证渲染层拿到稳定结构 */
 function normalizeAnalysis(raw, fallbackText) {
   const obj = raw || {};
   const fixActions = (arr) => (Array.isArray(arr) ? arr : [])
@@ -281,13 +254,6 @@ function normalizeAnalysis(raw, fallbackText) {
   };
 }
 
-/**
- * 把本地小模型的松散文本解析成结构化分析
- * 期望格式：
- *   原因：xxx
- *   要点：\n1. xxx\n2. xxx
- *   建议：\n1. xxx
- */
 function parseLooseText(text) {
   const raw = String(text || '').trim();
   if (!raw) return null;
@@ -328,13 +294,6 @@ function parseLooseText(text) {
   };
 }
 
-/**
- * 分析一次崩溃
- * @param {object} cfgIn
- * @param {object} ctx 崩溃现场
- * @param {Function} [localRunner] 本地模式回调：(cfg, messages) => Promise<string>
- * @returns {Promise<{ok:boolean, analysis?:object, error?:string}>}
- */
 async function analyzeCrash(cfgIn, ctx, localRunner) {
   const cfg = normalizeAiConfig(cfgIn);
   const messages = buildPrompt(collectCrashContext(ctx), cfg.mode === 'local');
@@ -366,11 +325,11 @@ async function analyzeCrash(cfgIn, ctx, localRunner) {
 
   const parsed = extractJSON(content);
   if (!parsed) {
-    // 本地小模型：尝试按「原因/要点/建议」宽松格式解析
+    
     if (cfg.mode === 'local') {
       const loose = parseLooseText(content);
       if (loose) {
-        // 本地模式：规则引擎结果为主，模型文本作为补充意见
+        
         const rule = analyzeByRules(collectCrashContext(ctx));
         const analysis = normalizeAnalysis({
           summary: rule.summary || loose.summary,
@@ -389,7 +348,7 @@ async function analyzeCrash(cfgIn, ctx, localRunner) {
         return { ok: true, analysis, degraded: true };
       }
     }
-    // 模型没给 JSON，降级为纯文本结论
+    
     return {
       ok: true,
       analysis: normalizeAnalysis({
@@ -404,7 +363,6 @@ async function analyzeCrash(cfgIn, ctx, localRunner) {
   return { ok: true, analysis: normalizeAnalysis(parsed, content) };
 }
 
-/** 测试连通性 */
 async function testConnection(cfgIn, localRunner) {
   const cfg = normalizeAiConfig(cfgIn);
   if (cfg.mode === 'local') {

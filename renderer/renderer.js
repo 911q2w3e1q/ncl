@@ -1,16 +1,10 @@
-/* NCL — Nexus Craft Launcher 渲染层逻辑
- * 在 Electron 中通过 window.cube 与主进程通信；
- * 在浏览器中直接打开 index.html 时自动进入 mock 预览模式（假数据，方便看界面）。
- */
 'use strict';
 
-/* ================= 默认皮肤（离线账户头像） ================= */
 const DEFAULT_SKINS = {
   steve: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAEwElEQVR4Xu1av2sUURgMqCABQQVBBK0SCdooMQQD5jSFkNgpKdIEwSZoZ6GYJohNUmlhqrSxsUlhYZM/If/TmdncrLOz3+7drcneXtyB4f36bvNm3vd2l32ZmOiD+3eudMHZqWtJyTrbn189LqVfb+xAwZ17N1LxqLsBH17MZniuDFDBXn5b6+TEkxjz640dXLSmP8r/wgDd+74VILJoC5wLA3TFNRsgHqRQv/mh7+v64vkwwO8BSoiE4KLSrzd2UNF+QwQpdnn6aobs9+s1DpraFDZ183Im5ZkFSjVBf6PX0WtEcSh9PrUjmiBIIVpX8V7yd5Foxvn10efzqR0qwifMvr03y91fn9a7v7+8S8qf79eSvkfT13OxINvs0zpNYJ/Pp3ZwQjpRXUkIhWAIp3gSY5Go6JqsM55tn0/t0ImxxCMM4iACQoGXT3ZS0agDaCMGffhNdC0aGhnUCAN8hShIyRV/+/RBQs0AJUX5yuv9QQ1B2+dTOzgRlFx5PsO/v15MX2jwaPu4NJdw6fZkJoaPPGaCXtMN8LbPp3bwrU3FuwkoIRomsKRoGqS/5fX0zfDurckM2e/zGTkWHu50lfPz8wlnZmYSenwOR0fp9lBj0Ycxv77TL5fDwUE34f5+Znt6WGX4hCicRnh8DsciVbyacNoGqNEeVhk+oSoZcNYGTB4epgY0MgPOdAscC9ct8M8Z8Gxurwvij6N8vvAjJftYkjp+cXc3Q0/PVHxv4kXxYKafQpW9uLS9tZWlxg4KChzUAB0HMdlL29sJU0E9oUxP74/iMyK9j/2RARsbJ6QBHB8UZQI9O3wchJALm5sJUdcURel9Hu8muFkZ8WJGMlZkADgoygQWGaB1iiH7CfL4UJi0c2mupHg1gRwULpDtqE/HSBeUWXEzQFc/MiC39/f/3uh4s9N6RI67zkK4Ab7CkSHa9pRODegJcQM83jMkFd9r66OON1Rtq+hKj8XIAN8GZeMURXoK66p6bBTvv3VhKj4ygKXrLASFFQnsZwAmqWKSDNAVZTb0BHl8aIDED2oAykoZ4OmtwpUeR1KQiqNwF8cYj8sYIOIR4yvrBqgRlQxYWVnpgn5zczLOqaIiM1Sgx6YGiGgVD6rgoizQLTC0AXi97XQ6GVGrq6s5oYjxWNR1i6hhmjk0gsI8RrePxiATIwM0K9wAlq6zEHzHpzgXSOFRHOpqAKnbiCVX1OP9XsMY9pcJ1/3vRrjOFi1atGjRosX4AR9Ai5h5fT44+ViajrVo0aJFixYtWtQN/5Q29OGqfELTDyEe1li4AUMfr4sBmZPlcYEbUCUD+JrLDBhrAypnwHFZ6airbujXX//I6WM6zpjcgaefEbDtbAoGEcls8DEwPOJWA9wEtpsCNwClG6Dj/QxID0vcCK83BS7QRfq49iUGlJ3xl5HQTOmZ498NnKdqoItnO+rTMdLP9/XG5wce2u/zGBmKBPtq67jGu1h99Hm7kY/FSGC/LaB0A4pEs5+lz2NkcIEoIwMic8DofM/Fq/DGZYCnv6+09kfbJNrnkXDv93mMDDxJpsAi+nE7WSY+Et44A3hcrqKG+f+CyAAV7Qaw7fMYGaL/G1CBFB7FoQ5BRfeByAiO+zyq4g8lK5z2I+oYkQAAAABJRU5ErkJggg==',
   alex: 'data:image/png;base64,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',
 };
 
-/* ================= mock 预览模式 ================= */
 const mockState = {
   gameRoot: '/预览模式',
   launcherVersion: '1.4.0',
@@ -48,7 +42,7 @@ const mockManifest = {
   ],
 };
 const mockListeners = {};
-/* 下载页 mock 数据（浏览器预览用） */
+
 const mockDLItems = [
   { id: 'sodium', title: 'Sodium', summary: '现代渲染引擎，大幅提升游戏帧数与兼容性', author: 'jellysquid3', downloads: 128000000, tags: ['fabric', '优化'], versions: ['1.21.4', '1.21.1'], icon: '' },
   { id: 'iris', title: 'Iris & Sodium 光影', summary: '兼容 OptiFine 光影包的 Fabric 光影模组', author: 'IMS212', downloads: 46000000, tags: ['fabric', '光影'], versions: ['1.21.4', '1.20.1'], icon: '' },
@@ -131,7 +125,7 @@ const mockApi = (channel, ...args) => new Promise((resolve) => {
       }); break;
       case 'versions:loaderVersions': {
         const { loader, mc } = args[0] || {};
-        // 真实版本号（取自各加载器官方 API，2026-10 数据）
+        
         const pool = {
           fabric: ['0.20.1', '0.20.0', '0.19.5', '0.19.4', '0.19.3'],
           forge: ['58.1.0', '54.1.3', '52.1.0', '47.1.3', '43.3.13'],
@@ -254,7 +248,7 @@ const mockApi = (channel, ...args) => new Promise((resolve) => {
       }
       case 'wiki:target': {
         const id = args[0] || '1.20.1';
-        // 浏览器预览用：直接指向中文 wiki 词条
+        
         const page = `Java版${id}`;
         resolve({
           ok: true,
@@ -334,12 +328,11 @@ const api = window.cube
   : mockApi;
 const onEvent = window.cube ? (ch, cb) => window.cube.on(ch, cb) : mockOn;
 
-/* ================= 全局状态 ================= */
 let state = null;
 let manifestCache = null;
-let installing = null; // { id, percent }
+let installing = null;
 let logLines = 0;
-let currentPage = 'game'; // 当前激活页面（refresh 时按需同步对应子页面）
+let currentPage = 'game';
 
 const $ = (id) => document.getElementById(id);
 const fmtBytes = (b) => (b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : (b / 1024).toFixed(0) + ' KB');
@@ -354,7 +347,6 @@ function toast(msg, ok = false) {
   t._timer = setTimeout(() => (t.hidden = true), 3600);
 }
 
-/* ================= 头像绘制（皮肤 → 头部） ================= */
 function drawAvatar(dataURL) {
   const canvas = $('avatar');
   const ctx = canvas.getContext('2d');
@@ -371,7 +363,7 @@ function drawAvatar(dataURL) {
     try {
       ctx.drawImage(img, 8, 8, 8, 8, off, off, size, size);
       if (is64) ctx.drawImage(img, 40, 8, 8, 8, off, off, size, size);
-    } catch { /* 非标准皮肤尺寸 */ }
+    } catch {}
   };
   img.onerror = () => {
     ctx.fillStyle = '#2a3448';
@@ -382,7 +374,6 @@ function drawAvatar(dataURL) {
   img.src = dataURL || DEFAULT_SKINS.steve;
 }
 
-/* ================= 账户卡片 ================= */
 async function renderAccountCard() {
   const acc = state.selectedAccount;
   const nameEl = $('acc-name'), typeEl = $('acc-type'), uuidEl = $('acc-uuid'), texEl = $('acc-tex');
@@ -409,8 +400,8 @@ async function renderAccountCard() {
     `<span class="tex-item">披风：<b>${acc.capeUrl ? '已佩戴' : '无'}</b></span>` +
     `<span class="tex-item">上次登录：<b>${acc.lastLoginAt ? new Date(acc.lastLoginAt).toLocaleString('zh-CN', { hour12: false }) : '本地'}</b></span>` +
     '<span class="tex-item" id="acc-api"></span>';
-  // 注意：acc-api 必须放进上面的 innerHTML 模板。此前模板里漏了它，
-  // innerHTML 重建会把原 acc-api 元素销毁，再引用就空引用崩溃（LittleSkin 登录报错根因）。
+  
+  
   const apiEl = $('acc-api');
   if (apiEl) apiEl.textContent = '接口：' + (isMs ? 'Microsoft' : isYs ? acc.apiRoot : '离线模式');
   $('btn-account').textContent = '管理账户';
@@ -421,7 +412,6 @@ async function renderAccountCard() {
   }
 }
 
-/* ================= 版本卡片 ================= */
 function renderVersionCard() {
   const vid = state.settings.selectedVersionId;
   const inst = state.installed.find((v) => v.id === vid);
@@ -434,8 +424,6 @@ function renderVersionCard() {
   $('launch-hint').textContent = vid ? `当前版本 ${vid}` : '未选择版本';
 }
 
-/* ================= 版本设置卡片（点击打开设置弹窗） ================= */
-/* 内存滑块上限：按系统实际内存封顶（与主进程 safeMemoryMB 同一口径：至少给系统留 512MB） */
 function sysMemMaxGB() {
   const sysMB = (state && state.sysMemoryMB) || 8192;
   return Math.max(2, Math.min(32, Math.floor((sysMB - 512) / 1024)));
@@ -469,7 +457,7 @@ function renderSettingsCard() {
       : '选择版本后自动匹配';
     js.title = '';
   }
-  // 黄卡摘要
+  
   const javaText = vs.javaPath ? '手动指定' : '自动匹配';
   $('vsettings-summary').innerHTML =
     `<span class="ss-item">内存 <b>${memGB} GB</b></span><span class="ss-dot">·</span>` +
@@ -502,7 +490,6 @@ function bindSettings() {
   });
 }
 
-/* ================= 启动器设置页（PCL 式结构：左分类 + 右卡片） ================= */
 const ACCENTS = {
   pink:     { accent: '#ec4899', deep: '#db2777', tint: '#fdf2f8', border: '#fbcfe8' },
   red:      { accent: '#e5484d', deep: '#c93539', tint: '#fef2f2', border: '#fecaca' },
@@ -522,7 +509,7 @@ function applyAccent(name) {
   s.setProperty('--accent-tint', a.tint);
   s.setProperty('--accent-tint-border', a.border);
 }
-/* mock 模式（无 Electron 协议）下的演示背景：SVG 渐变 + 像素山丘 */
+
 const MOCK_BG_DATAURI = "data:image/svg+xml," + encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720">' +
   '<defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">' +
@@ -532,7 +519,7 @@ const MOCK_BG_DATAURI = "data:image/svg+xml," + encodeURIComponent(
   '<path d="M0 520 L180 380 L340 500 L520 350 L700 520 L880 420 L1060 540 L1280 440 L1280 720 L0 720 Z" fill="#0f172a" opacity=".82"/>' +
   '<path d="M0 600 L220 500 L420 610 L640 520 L900 620 L1120 540 L1280 610 L1280 720 L0 720 Z" fill="#020617" opacity=".9"/>' +
   '</svg>');
-/** 应用主题：强调色（含顶部导航栏）+ 背景图片 */
+
 function applyTheme(g) {
   applyAccent((g && g.accent) || 'pink');
   const layer = $('bg-layer');
@@ -544,7 +531,7 @@ function applyTheme(g) {
   layer.style.backgroundImage = `url("${url}")`;
   document.body.classList.add('has-bg');
 }
-/** 背景图片展示名（设置页用） */
+
 function bgDisplayName(g) {
   const bg = (g && g.background) || '';
   if (!bg) return '默认背景';
@@ -555,7 +542,7 @@ const ACCOUNT_TYPE_LABELS = { offline: '离线', yggdrasil: 'LittleSkin', micros
 function renderSettingsPage() {
   if (!state || !state.settings) return;
   const g = state.settings.global || {};
-  // 内存
+  
   const maxGB = sysMemMaxGB();
   const memGB = Math.max(1, Math.min(maxGB, Math.round((g.memory || 2048) / 1024)));
   const spMem = $('sp-memory');
@@ -564,36 +551,36 @@ function renderSettingsPage() {
   $('sp-memory-val').textContent = memGB + ' GB';
   const pct = ((memGB - 1) / (maxGB - 1)) * 100;
   spMem.style.setProperty('--range-pct', pct + '%');
-  // Java
+  
   const js = $('sp-java-status');
   if (g.javaPath) { js.textContent = g.javaPath; js.title = g.javaPath; $('sp-btn-java-auto').hidden = false; }
   else { js.textContent = '自动匹配 / 缺失时自动下载'; js.title = ''; $('sp-btn-java-auto').hidden = true; }
-  // 窗口
+  
   $('sp-width').value = g.width || 854;
   $('sp-height').value = g.height || 480;
   $('sp-fullscreen').checked = !!g.fullscreen;
-  // 其他
+  
   $('sp-jvmargs').value = g.jvmArgs || '';
   $('sp-isolation').checked = !!g.isolation;
   $('sp-server').value = g.serverAddress || '';
   $('sp-mirror').checked = !!g.mirror;
-  // 主题（强调色 + 背景图片）
+  
   applyTheme(g);
   document.querySelectorAll('.set-swatch').forEach((b) => b.classList.toggle('active', b.dataset.accent === (g.accent || 'pink')));
-  // 背景图片卡片
+  
   const bgName = $('sp-bg-name');
   if (bgName) { bgName.textContent = bgDisplayName(g); bgName.title = g.backgroundName || ''; }
   const bgReset = $('sp-btn-reset-bg');
   if (bgReset) bgReset.hidden = !g.background;
-  // 启动器信息
+  
   $('sp-gameroot').textContent = state.gameRoot || '—';
   $('sp-gameroot').title = state.gameRoot || '';
-  // 有旧目录待迁移数据时才显示「迁移旧数据」
+  
   const prev = (state.settings.global || {}).gameRootPrev;
   const mig = $('sp-btn-migrate-root');
   if (mig) mig.hidden = !prev;
   $('sp-about-version').textContent = 'v' + (state.launcherVersion || '1.0.0');
-  // 账户
+  
   const list = $('sp-account-list');
   const accs = state.accounts || [];
   if (!accs.length) list.innerHTML = '<span class="set-account-empty">尚未登录账户</span>';
@@ -606,23 +593,23 @@ function renderSettingsPage() {
   }
 }
 function bindSettingsPage() {
-  // 保存全局设置（版本级覆盖仍在游戏页「版本设置」）
+  
   const save = (patch) => api('settings:save', { global: patch }).then(() => { Object.assign(state.settings.global, patch); });
-  // 左分类切换
+  
   document.querySelectorAll('.set-rail-item').forEach((btn) => {
     btn.onclick = () => {
       document.querySelectorAll('.set-rail-item').forEach((b) => b.classList.toggle('active', b === btn));
       document.querySelectorAll('.set-pane').forEach((p) => p.classList.toggle('active', p.dataset.spane === btn.dataset.scat));
     };
   });
-  // 内存滑块
+  
   $('sp-memory').addEventListener('input', (e) => {
     const v = Number(e.target.value);
     $('sp-memory-val').textContent = v + ' GB';
     e.target.style.setProperty('--range-pct', ((v - 1) / (Number(e.target.max) - 1)) * 100 + '%');
   });
   $('sp-memory').addEventListener('change', (e) => save({ memory: Number(e.target.value) * 1024 }));
-  // Java
+  
   $('sp-btn-pick-java').addEventListener('click', async () => {
     const info = await api('dialog:pickJava');
     if (info) { toast(`已选择 Java ${info.major}`, true); await save({ javaPath: info.path }); refresh(); renderSettingsPage(); }
@@ -630,16 +617,16 @@ function bindSettingsPage() {
   $('sp-btn-java-auto').addEventListener('click', async () => {
     await save({ javaPath: '' }); toast('已恢复自动匹配 Java', true); refresh(); renderSettingsPage();
   });
-  // 窗口
+  
   $('sp-width').addEventListener('change', (e) => save({ width: Number(e.target.value) || 854 }));
   $('sp-height').addEventListener('change', (e) => save({ height: Number(e.target.value) || 480 }));
   $('sp-fullscreen').addEventListener('change', (e) => save({ fullscreen: e.target.checked }));
-  // JVM / 隔离 / 服务器 / 镜像
+  
   $('sp-jvmargs').addEventListener('change', (e) => save({ jvmArgs: e.target.value.trim() }));
   $('sp-isolation').addEventListener('change', (e) => save({ isolation: e.target.checked }));
   $('sp-server').addEventListener('change', (e) => save({ serverAddress: e.target.value.trim() }));
   $('sp-mirror').addEventListener('change', (e) => save({ mirror: e.target.checked }));
-  // 主题色
+  
   document.querySelectorAll('.set-swatch').forEach((btn) => {
     btn.onclick = async () => {
       applyAccent(btn.dataset.accent);
@@ -648,7 +635,7 @@ function bindSettingsPage() {
       toast('主题强调色已更新', true);
     };
   });
-  // 背景图片：选择 / 恢复默认
+  
   $('sp-btn-pick-bg').addEventListener('click', async () => {
     const btn = $('sp-btn-pick-bg');
     btn.disabled = true; btn.textContent = '处理中…';
@@ -674,13 +661,13 @@ function bindSettingsPage() {
     $('sp-btn-reset-bg').hidden = true;
     toast('已恢复默认背景', true);
   });
-  // 打开游戏目录（shell.openPath：直接调系统文件管理器，跨平台不拼 file:// URL）
+  
   $('sp-btn-open-root').addEventListener('click', async () => {
     if (!state.gameRoot) return toast('尚未设置游戏目录');
     const r = await api('shell:openPath', state.gameRoot);
     if (r && r.ok === false) toast('打开文件夹失败：' + (r.error || '未知错误'));
   });
-  // 更改游戏目录
+  
   $('sp-btn-change-root').addEventListener('click', async () => {
     const dir = await api('dialog:pickGameRoot');
     if (!dir) return;
@@ -690,7 +677,7 @@ function bindSettingsPage() {
     toast('游戏目录已切换，重启后旧数据可通过「迁移旧数据」搬入', true);
     renderSettingsPage();
   });
-  // 迁移旧目录数据
+  
   $('sp-btn-migrate-root').addEventListener('click', async () => {
     const r = await api('launcher:migrateGameRoot');
     if (!r || !r.ok) return toast('迁移失败：' + ((r && r.error) || '未知错误'));
@@ -698,16 +685,15 @@ function bindSettingsPage() {
     toast('旧数据已迁移到新游戏目录', true);
     await refresh();
   });
-  // 检查更新（GitHub Releases）
+  
   $('sp-btn-check-update').addEventListener('click', () => checkUpdate(true));
-  // 打开账户管理
+  
   $('sp-btn-open-account').addEventListener('click', () => openAccountModal());
 }
 
-/* ================= 检查更新 ================= */
 const up = { checking: false, downloading: false, info: null };
 function fmtUpdateNotes(md) {
-  // Release 说明是 Markdown：转义后做最小渲染（标题/列表/链接/加粗/换行），够读且安全
+  
   const lines = String(md || '').split(/\r?\n/);
   const escHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const inline = (s) => escHtml(s)
@@ -757,7 +743,7 @@ function openUpdateModal(info) {
   $('um-cur').textContent = 'v' + (info.current);
   $('um-new').textContent = 'v' + info.latest;
   $('um-notes').innerHTML = fmtUpdateNotes(info.notes);
-  // Release 说明里的链接：委托打开系统浏览器
+  
   $('um-notes').onclick = (e) => {
     const a = e.target.closest('a[data-url]');
     if (a) { e.preventDefault(); api('shell:openExternal', a.dataset.url); }
@@ -795,7 +781,7 @@ function bindUpdateModal() {
         btn.disabled = true; btn.textContent = '正在重启…';
         const ar = await api('updater:apply');
         if (ar && ar.ok === false) { toast('安装失败：' + (ar.error || '未知错误')); btn.disabled = false; btn.textContent = '立即重启并安装'; }
-        // ok：主进程会退出并交给平台脚本替换文件后重启
+        
       };
     } catch (e) {
       toast('下载失败：' + ((e && e.message) || e));
@@ -814,7 +800,6 @@ function bindUpdateModal() {
   });
 }
 
-/* ================= 版本弹窗 ================= */
 let verTab = 'installed';
 let verSearch = '';
 const LOADER_TABS = ['fabric', 'forge', 'neoforge', 'quilt'];
@@ -833,22 +818,45 @@ function closeModal(id) { $(id).hidden = true; }
 async function loadVerList() {
   if (!manifestCache) manifestCache = await api('versions:manifest');
   const installedIds = new Set(state.installed.map((v) => v.id));
-  // 已安装的模组加载器版本反查其 MC 版本（主进程 listInstalled 已识别 loader / mc）
+  
   const loaderInstalledMC = (loader) => new Set(
     state.installed.filter((v) => (v.loader || (v.fabric ? 'fabric' : null)) === loader && v.mc).map((v) => v.mc)
   );
+  
+  const loaderInstanceOf = (loader, mc) => {
+    const hit = state.installed.find((v) =>
+      (v.loader || (v.fabric ? 'fabric' : null)) === loader && v.mc === mc);
+    return hit ? hit.id : '';
+  };
   let list = [];
   if (verTab === 'installed') {
-    list = state.installed.map((v) => ({ id: v.id, type: v.loader || (v.fabric ? 'fabric' : 'installed'), time: v.time, installed: true }));
+    
+    
+    
+    
+    
+    list = state.installed.map((v) => ({
+      id: v.id,
+      type: 'installed',
+      loaderKind: v.loader || (v.fabric ? 'fabric' : ''),
+      time: v.time,
+      installed: true,
+    }));
   } else if (LOADER_TABS.includes(verTab)) {
-    // 全量正式版列表（可搜索）；已装过该 loader 的版本直接标「已安装」，行上显示最新 loader 版本号
+    
     const catalog = await getLoaderCatalog();
     const catMap = catalog[verTab] || {};
     const installedMC = loaderInstalledMC(verTab);
     list = manifestCache.versions
       .filter((v) => v.type === 'release')
       .slice(0, 400)
-      .map((v) => ({ ...v, type: verTab, installed: installedMC.has(v.id), loaderVer: catMap[v.id] || '' }));
+      .map((v) => ({
+        ...v,
+        type: verTab,
+        installed: installedMC.has(v.id),
+        loaderVer: catMap[v.id] || '',
+        loaderInstance: installedMC.has(v.id) ? loaderInstanceOf(verTab, v.id) : '',
+      }));
   } else if (verTab === 'old') {
     list = manifestCache.versions.filter((v) => v.type.startsWith('old_'));
   } else {
@@ -861,21 +869,56 @@ async function loadVerList() {
   for (const v of list) {
     const row = document.createElement('div');
     row.className = 'ver-row';
-    const typeLabel = { release: '正式版', snapshot: '快照', old_beta: 'Beta', old_alpha: 'Alpha', fabric: 'Fabric', forge: 'Forge', neoforge: 'NeoForge', quilt: 'Quilt', installed: '已安装' }[v.type] || v.type;
+    
+    const shownType = v.loaderKind || v.type;
+    const typeLabel = v.loaderKind
+      ? LOADER_LABELS[v.loaderKind]
+      : ({ release: '正式版', snapshot: '快照', old_beta: 'Beta', old_alpha: 'Alpha', fabric: 'Fabric', forge: 'Forge', neoforge: 'NeoForge', quilt: 'Quilt', installed: '已安装' }[v.type] || v.type);
     const inst = installedIds.has(v.id);
     const sel = state.settings.selectedVersionId === v.id;
     row.innerHTML =
       `<span class="vname">${v.id}</span>` +
-      `<span class="vtype ${v.type}">${typeLabel}</span>` +
+      `<span class="vtype ${shownType}">${typeLabel}</span>` +
       `<span class="vmeta">${(v.releaseTime || v.time || '').slice(0, 10)}${v.loaderVer ? ` · ${LOADER_LABELS[v.type]} ${v.loaderVer}` : ''}${sel ? ' · <b style="color:#93c5fd">当前选择</b>' : ''}</span>` +
       `<span class="vstate">${inst ? '已装' : ''}</span>`;
     const btn = document.createElement('button');
     btn.className = 'btn';
     if (LOADER_TABS.includes(v.type)) {
+      
       const label = LOADER_LABELS[v.type];
       if (v.installed) {
+        
+        
         btn.textContent = `已装 ${label}`;
-        btn.disabled = true;
+        btn.onclick = async () => {
+          const target = v.loaderInstance || v.id;
+          await api('versions:select', target);
+          closeModal('modal-version');
+          await refresh();
+          toast(`已切换到 ${target}`, true);
+        };
+        const more = document.createElement('button');
+        more.className = 'btn-ghost btn-sm';
+        more.style.marginLeft = '6px';
+        more.textContent = '装其它版本';
+        more.onclick = async () => {
+          const cat = await getLoaderCatalog();
+          const vers = await api('versions:loaderVersions', { loader: v.type, mc: v.id });
+          const list2 = (vers && vers.ok && vers.versions) || [];
+          if (!list2.length) { toast(`未获取到 ${label} 版本列表`, false); return; }
+          const want = window.prompt(`安装 ${v.id} 的哪个 ${label} 版本？\n（当前目录版本：${(cat[v.type] || {})[v.id] || '未知'}）`, list2[0]);
+          if (!want) return;
+          const r = await api('versions:installLoader', { loader: v.type, mc: v.id, version: want.trim() });
+          if (r && r.ok) {
+            toast(`${v.id} ${label} ${want.trim()} 安装完成`, true);
+            if (r.id) await api('versions:select', r.id);
+            await refresh(); loadVerList();
+          } else toast((r && r.error) || '安装失败', false);
+        };
+        row.appendChild(btn);
+        row.appendChild(more);
+        box.appendChild(row);
+        continue;
       } else {
         const installText = v.loaderVer ? `安装 ${label} ${v.loaderVer}` : `安装 ${label}`;
         btn.textContent = installText;
@@ -886,7 +929,13 @@ async function loadVerList() {
             ? await api('versions:installFabric', v.id)
             : await api('versions:installLoader', { loader: v.type, mc: v.id });
           installing = null;
-          if (r.ok) { toast(`${v.id} ${label} 安装完成`, true); await refresh(); loadVerList(); }
+          if (r.ok) {
+            toast(`${v.id} ${label} 安装完成`, true);
+            
+            const newId = (r.result && r.result.id) || r.id || v.loaderInstance;
+            if (newId) await api('versions:select', newId);
+            await refresh(); loadVerList();
+          }
           else { toast(r.error); btn.disabled = false; btn.textContent = installText; }
         };
       }
@@ -909,7 +958,6 @@ async function loadVerList() {
   }
 }
 
-/* ================= 账户弹窗 ================= */
 function openAccountModal() {
   $('modal-account').hidden = false;
   renderAccountList();
@@ -941,7 +989,6 @@ function renderAccountList() {
   }
 }
 
-/* ================= 启动流程 ================= */
 function setLaunchButton(mode) {
   const btn = $('btn-launch'), txt = $('btn-launch-text'), prog = $('launch-progress');
   if (mode === 'running') { btn.classList.add('running'); btn.disabled = false; txt.textContent = '结束游戏'; prog.hidden = true; }
@@ -955,11 +1002,10 @@ function appendLog(line) {
   box.scrollTop = box.scrollHeight;
   logLines++;
   $('log-count').textContent = `(${logLines} 行)`;
-  // 首条日志到达 = 游戏进程已真正拉起：按钮切到可中断的「结束游戏」
+  
   if (!state.running && line) { state.running = true; setLaunchButton('running'); }
 }
 
-/* 防连点：从点击到游戏退出事件之间保持锁定，避免并发 launch / 假死 */
 let launching = false;
 async function onLaunchClick() {
   if (launching) return;
@@ -980,7 +1026,7 @@ async function onLaunchClick() {
     setLaunchButton('busy');
     const r = await api('game:launch', vid);
     if (!r.ok) { toast('启动失败：' + r.error); setLaunchButton('idle'); return; }
-    // 已受理：进程起来由日志事件切「结束游戏」，退出由 game-exit 复位
+    
   } catch (e) {
     toast('启动失败：' + ((e && e.message) || e));
     setLaunchButton('idle');
@@ -989,7 +1035,6 @@ async function onLaunchClick() {
   }
 }
 
-/* ================= 进度事件 ================= */
 function onProgress(p) {
   if (p.stage === 'error') { toast(p.message); setLaunchButton('idle'); if (installing && installing.btn) { installing.btn.disabled = false; installing.btn.textContent = '安装'; } installing = null; return; }
   const pct = p.percent || 0;
@@ -997,7 +1042,7 @@ function onProgress(p) {
   $('lp-text').textContent = `${p.message || ''}${p.speed ? ' · ' + fmtSpeed(p.speed) : ''}`;
   if (installing && installing.btn) installing.btn.textContent = pct + '%';
   if (p.stage === 'done') { setTimeout(() => { if (!state.running) setLaunchButton('idle'); }, 800); installing = null; }
-  // 版本卡片下方的安装进度
+  
   const vid = state.settings.selectedVersionId;
   if (vid && !state.installed.some((v) => v.id === vid)) {
     $('install-progress').hidden = false;
@@ -1008,12 +1053,11 @@ function onProgress(p) {
   }
 }
 
-/* ================= 页面渲染 ================= */
-let refreshSeq = 0; // 并发守卫：快速切换版本/目录时会并发多次 getState，只认最后一次
+let refreshSeq = 0;
 async function refresh() {
   const seq = ++refreshSeq;
   state = await api('launcher:getState');
-  if (seq !== refreshSeq) return; // 已有更新的刷新被触发，丢弃本次过期结果
+  if (seq !== refreshSeq) return;
   await renderAccountCard();
   if (seq !== refreshSeq) return;
   renderVersionCard();
@@ -1023,15 +1067,14 @@ async function refresh() {
   if (currentPage === 'settings') renderSettingsPage();
 }
 
-/* ================= 事件绑定 ================= */
 function bindUI() {
-  // 窗口按钮
+  
   $('win-min').onclick = () => api('window:minimize');
   $('win-max').onclick = () => api('window:maximize');
   $('win-close').onclick = () => api('window:close');
 
-  // 导航
-  const soonTitles = {}; // 所有页面均已实现，预留占位
+  
+  const soonTitles = {};
   document.querySelectorAll('.nav-item').forEach((btn) => {
     btn.onclick = () => {
       const page = btn.dataset.page;
@@ -1047,7 +1090,7 @@ function bindUI() {
   });
   $('btn-back-game').onclick = () => document.querySelector('.nav-item[data-page="game"]').click();
 
-  // 弹窗
+  
   $('btn-switch-version').onclick = openVersionModal;
   $('btn-account').onclick = openAccountModal;
   $('card-vsettings').onclick = () => openVSettingsModal();
@@ -1079,7 +1122,7 @@ function bindUI() {
   }));
   $('ver-search').addEventListener('input', (e) => { verSearch = e.target.value.trim(); loadVerList(); });
 
-  // 账户登录
+  
   $('btn-offline-login').onclick = async () => {
     const name = $('offline-name').value.trim();
     if (!name) return toast('请输入玩家名');
@@ -1090,14 +1133,14 @@ function bindUI() {
   $('btn-ys-login').onclick = async () => {
     const apiRoot = $('ys-api').value.trim(), username = $('ys-user').value.trim(), password = $('ys-pass').value;
     if (!apiRoot || !username || !password) return toast('请填写完整的皮肤站地址、用户名与密码');
-    // 登录与界面刷新分开捕获：账户入库成功后，刷新异常不应误报「登录失败」
+    
     try { await api('account:loginYggdrasil', { apiRoot, username, password }); }
     catch (e) { return toast('登录失败：' + e.message); }
     try { await refresh(); renderAccountList(); toast('LittleSkin 登录成功', true); }
     catch (e) { toast('登录成功，但界面刷新出错：' + (e && e.message || e)); }
   };
 
-  // 微软正版登录（设备码流）
+  
   $('btn-ms-login').onclick = async () => {
     const btn = $('btn-ms-login');
     btn.disabled = true; btn.textContent = '等待授权…';
@@ -1124,10 +1167,10 @@ function bindUI() {
     if (p.verificationUri) $('btn-ms-open').onclick = () => api('shell:openExternal', p.verificationUri);
   });
 
-  // 启动
+  
   $('btn-launch').onclick = onLaunchClick;
 
-  // 事件订阅
+  
   onEvent('launcher://progress', onProgress);
   onEvent('launcher://dl-progress', onDlProgress);
   onEvent('launcher://game-log', appendLog);
@@ -1139,13 +1182,12 @@ function bindUI() {
     else toast('游戏已退出');
     setLaunchButton('idle');
   });
-  // 启动时静默检查更新发现有新版 → 提示去设置页查看
+  
   onEvent('launcher://up-available', (p) => {
     if (p && p.latest) toast(`发现新版本 v${p.latest}（当前 v${p.current || ''}），可在「设置 → 启动器」中更新`, false);
   });
 }
 
-/* ================= 下载页 ================= */
 const DL_MC_VERSIONS = [
   '1.21.4', '1.21.1', '1.21', '1.20.6', '1.20.4', '1.20.1', '1.20',
   '1.19.4', '1.19.2', '1.19', '1.18.2', '1.18.1', '1.17.1', '1.16.5',
@@ -1174,7 +1216,7 @@ function mcVersionRange(detail) {
     for (const g of v.gameVersions || []) if (/^\d+\.\d+(\.\d+)?$/.test(g)) set.add(g);
   }
   if (!set.size) {
-    // 快照 / 预览版等非语义化版本号：直接取首个版本标识
+    
     const first = ((detail && detail.versions) || [])[0];
     const g = first && (first.gameVersions || [])[0];
     return g || '—';
@@ -1184,20 +1226,18 @@ function mcVersionRange(detail) {
 }
 function fmtDate(d) { return d ? String(d).slice(0, 10) : '—'; }
 
-/** 草方块 SVG（原版分类图标，避免字母占位） */
 const CUBE_SVG = '<svg viewBox="0 0 24 24" width="22" height="22"><path fill="#8bc34a" d="M12 3 4 7.5 12 12l8-4.5L12 3Z"/><path fill="#689f38" d="M4 7.5 12 12v9L4 16.5v-9Z"/><path fill="#795548" d="M12 12v9l8-4.5v-9L12 12Z"/></svg>';
 
 function dlIconHTML(item, cls, isVanilla) {
   if (isVanilla) return `<div class="${cls}">${CUBE_SVG}</div>`;
   const label = esc((item.title || '?').trim().charAt(0).toUpperCase());
-  // 字母垫底；图片加载失败时自动移除，回退字母头像
+  
   return item.icon
     ? `<div class="${cls}"><span class="dl-icon-fallback">${label}</span><img src="${esc(item.icon)}" alt="" loading="lazy" onerror="this.remove()" /></div>`
     : `<div class="${cls}">${label}</div>`;
 }
 
-/* ---------- 列表 ---------- */
-let dlReqSeq = 0; // 请求序号守卫：URL 参数/快速切换会并发触发多次加载，只有最后一次请求的结果允许渲染
+let dlReqSeq = 0;
 async function dlLoadList() {
   dl.loaded = true;
   const seq = ++dlReqSeq;
@@ -1205,13 +1245,13 @@ async function dlLoadList() {
   box.innerHTML = '<div class="dl-empty">正在加载内容列表…</div>';
   $('dl-count').textContent = '加载中…';
   $('dl-source-note').textContent = dl.source === 'mirror' ? '镜像站：仅原版分类生效' : '';
-  // 弯引号规范化：从别处复制的模组名常带 ’‘“”，直接搜 Modrinth 会搜偏
+  
   const q = dl.query.replace(/[’‘]/g, "'").replace(/[“”]/g, '"');
   const r = await api('download:search', {
     category: dl.category, source: dl.source, query: q,
     page: 1, mcVersion: dl.mcVersion, loader: dl.loader,
   });
-  if (seq !== dlReqSeq) return; // 已有更新的加载被触发，丢弃本次过期结果
+  if (seq !== dlReqSeq) return;
   if (r && r.error) {
     box.innerHTML = `<div class="dl-empty">${esc(r.error)}</div>`;
     $('dl-count').textContent = '加载失败';
@@ -1240,7 +1280,7 @@ async function dlLoadList() {
     });
     row.addEventListener('mouseleave', () => clearTimeout(dl.hoverTimer));
     row.addEventListener('click', () => {
-      // 原版游戏：点一下直接进入「选加载器 → 选加载器版本」流程
+      
       if (dl.category === 'vanilla' && !item.installed) { openLoaderPicker(item.id); return; }
       dlShowDetail(item);
     });
@@ -1248,7 +1288,6 @@ async function dlLoadList() {
   }
 }
 
-/* ---------- 悬停详情（灰色面板） ---------- */
 async function dlShowDetail(item) {
   dl.activeId = item.id;
   document.querySelectorAll('.dl-item').forEach((r) => r.classList.toggle('active', r.dataset.id === item.id));
@@ -1257,7 +1296,7 @@ async function dlShowDetail(item) {
   body.innerHTML = '<div class="dl-empty">加载详情…</div>';
   dl.detail = null; dl.selectedVersionId = null;
 
-  // 原版游戏：详情就地生成，无需请求
+  
   if (dl.category === 'vanilla') {
     const entry = { id: item.id, number: item.id, name: item.id, date: item.updated, gameVersions: [item.id], loaders: [] };
     dl.detail = {
@@ -1272,7 +1311,7 @@ async function dlShowDetail(item) {
   }
 
   const r = await api('download:detail', { source: item.source, id: item.id });
-  if (dl.activeId !== item.id) return; // 悬停已移走
+  if (dl.activeId !== item.id) return;
   if (r && r.error) { body.innerHTML = `<div class="dl-empty">${esc(r.error)}</div>`; return; }
   dl.detail = r;
   dl.selectedVersionId = r.latest ? r.latest.id : null;
@@ -1323,7 +1362,6 @@ function dlRenderDetail() {
   if (openUrl) openUrl.onclick = (e) => { e.preventDefault(); api('shell:openExternal', d.url); };
 }
 
-/* ---------- 加载器选择（下载页：点一下选加载器 → 选加载器版本 → 安装） ---------- */
 const dlLoader = { mc: '', loader: 'fabric', versions: [], search: '' };
 
 function openLoaderPicker(mcVersion) {
@@ -1340,14 +1378,12 @@ function openLoaderPicker(mcVersion) {
   dlLoaderRender();
 }
 
-/** Fabric API 勾选项只在 Fabric 页签显示（其它加载器不需要它） */
 function dlLoaderSyncApiRow() {
   const row = $('dl-fabric-api-row');
   if (!row) return;
   row.hidden = dlLoader.loader !== 'fabric';
 }
 
-/** 查该 MC 版本有没有 Fabric API，并在勾选项旁显示具体版本号 */
 async function dlLoaderLoadApiVersion() {
   const desc = $('dl-fabric-api-desc');
   if (!desc) return;
@@ -1368,7 +1404,7 @@ async function dlLoaderRender() {
   box.innerHTML = '<div class="dl-empty">加载中…</div>';
   const r = await api('versions:loaderVersions', { loader: dlLoader.loader, mc: dlLoader.mc });
   if (dlLoader.search) {
-    // 重新拉一次带搜索的结果
+    
   }
   if (!r || !r.ok) {
     box.innerHTML = `<div class="dl-empty">${esc((r && r.error) || '获取加载器版本失败')}</div>`;
@@ -1431,7 +1467,6 @@ function dlLoaderInit() {
   if (s) s.oninput = () => { dlLoader.search = s.value.trim(); dlLoaderRender(); };
 }
 
-/* ---------- 安装 ---------- */
 async function dlInstall() {
   const d = dl.detail;
   if (!d || dl.installing) return;
@@ -1464,7 +1499,6 @@ async function dlInstall() {
   dlLoadList();
 }
 
-/* ---------- 安装进度 ---------- */
 function onDlProgress(p) {
   if (p.stage === 'error') { toast(p.message); $('dl-status').hidden = true; dl.installing = false; return; }
   $('dl-status').hidden = false;
@@ -1472,9 +1506,8 @@ function onDlProgress(p) {
   $('dl-status-text').textContent = p.message || '';
 }
 
-/* ---------- 工具栏绑定 ---------- */
 function bindDownloadUI() {
-  // 分类
+  
   document.querySelectorAll('.dl-cat').forEach((btn) => {
     btn.onclick = () => {
       document.querySelectorAll('.dl-cat').forEach((b) => b.classList.toggle('active', b === btn));
@@ -1482,12 +1515,12 @@ function bindDownloadUI() {
       dl.activeId = null; dl.detail = null; dl.selectedVersionId = null;
       $('dl-detail-body').hidden = true;
       $('dl-detail-empty').hidden = false;
-      // 加载器筛选仅对 Mod 有意义
+      
       $('dl-loader').disabled = dl.category !== 'mod';
       dlLoadList();
     };
   });
-  // 来源
+  
   document.querySelectorAll('.src-btn').forEach((btn) => {
     btn.onclick = () => {
       document.querySelectorAll('.src-btn').forEach((b) => b.classList.toggle('active', b === btn));
@@ -1495,7 +1528,7 @@ function bindDownloadUI() {
       dlLoadList();
     };
   });
-  // MC 版本下拉
+  
   const sel = $('dl-mcver');
   for (const v of DL_MC_VERSIONS) {
     const o = document.createElement('option');
@@ -1504,7 +1537,7 @@ function bindDownloadUI() {
   }
   sel.onchange = () => { dl.mcVersion = sel.value; dlLoadList(); };
   $('dl-loader').onchange = (e) => { dl.loader = e.target.value; dlLoadList(); };
-  // 搜索（防抖）
+  
   let timer = null;
   $('dl-query').addEventListener('input', (e) => {
     dl.query = e.target.value.trim();
@@ -1513,7 +1546,7 @@ function bindDownloadUI() {
   });
   $('dl-query').addEventListener('keydown', (e) => { if (e.key === 'Enter') { clearTimeout(timer); dlLoadList(); } });
   $('dl-search-btn').onclick = dlLoadList;
-  // 导入本地文件（补 Modrinth 没有的内容：CurseForge 独占模组 / 整合包等）
+  
   $('dl-import').onclick = async () => {
     if (dl.category === 'vanilla') { toast('原版游戏请从列表中安装，不支持导入', false); return; }
     const r = await api('content:importFile', { category: dl.category });
@@ -1522,11 +1555,10 @@ function bindDownloadUI() {
   };
 }
 
-/* 本地导入完成后的统一收尾（按钮导入 / 拖拽导入共用） */
 async function afterContentImport(r, category) {
   if (!r.ok) { toast('导入失败：' + (r.error || '未知错误'), false); return; }
   if (r.installed) {
-    // 整合包：安装完成后自动切换到其 Fabric 版本
+    
     if (r.result && r.result.fabricVersionId) {
       await api('versions:select', r.result.fabricVersionId);
       await refresh();
@@ -1543,15 +1575,14 @@ async function afterContentImport(r, category) {
   }
 }
 
-/* ================= 拖拽导入（PCL 式：拖文件到窗口即加载） ================= */
-const dropZipQueue = []; // 待选择类型的 zip 队列
+const dropZipQueue = [];
 
 function droppedFilePath(file) {
   if (window.cube && window.cube.getPathForFile) {
     const p = window.cube.getPathForFile(file);
     if (p) return p;
   }
-  return file.name; // 浏览器预览模式：用文件名占位
+  return file.name;
 }
 
 function initDragDrop() {
@@ -1592,12 +1623,12 @@ async function handleDroppedFiles(files) {
   if (!state.settings.selectedVersionId && jars.length) {
     toast('尚未选择版本，Mod 将装入游戏根目录', false);
   }
-  // jar → Mod 直接导入
+  
   for (const f of jars) {
     const r = await api('content:importPath', { category: 'mod', filePath: droppedFilePath(f) });
     await afterContentImport(r, 'mod');
   }
-  // zip / mrpack → 弹类型选择，逐个处理
+  
   if (zips.length) {
     dropZipQueue.length = 0;
     dropZipQueue.push(...zips.map(droppedFilePath));
@@ -1619,24 +1650,19 @@ function bindDropTypeModal() {
       if (!filePath) { closeModal('modal-drop-type'); return; }
       const r = await api('content:importPath', { category: btn.dataset.cat, filePath });
       await afterContentImport(r, btn.dataset.cat);
-      openDropTypeModal(); // 处理队列中的下一个（无则自动关闭）
+      openDropTypeModal();
     };
   });
 }
 
-/* ================= Wiki 整合页 =================
- * 交互流：左侧紫搜索框过滤粉色版本列表 → 点列表项在右侧灰色区显示简略资料
- * → 点简略卡里的红色按钮进入详细视图 → 详细视图左上角返回键回到简略。
- * 数据来自版本清单 + 本机安装状态（wiki:versionInfo），可完全本地验证；
- * 百科正文通过外链按钮跳转系统浏览器（minecraft.wiki 有反爬，不站内抓取）。 */
 const WIKI_TYPE_LABELS = { release: '正式版', snapshot: '快照', old_beta: 'Beta', old_alpha: 'Alpha', fabric: 'Fabric', installed: '已安装' };
 const wiki = {
   tab: 'all',
   query: '',
   selectedId: null,
-  view: 'brief', // 'brief' 简略 | 'detail' 详细
+  view: 'brief',
   detailCache: {},
-  targetCache: {}, // versionId → { lang, host, page, url }
+  targetCache: {},
 };
 
 function wikiInstalledSets() {
@@ -1666,14 +1692,14 @@ function wikiFilteredList() {
     list = list.filter((v) => v.id.toLowerCase().includes(q));
     return list.slice(0, 100);
   }
-  // 无搜索词时只渲染最近的版本，避免上千条 DOM
+  
   return list.slice(0, 40).map((v) => ({ ...v, installed: ids.has(v.id), fabric: fab.has(v.id) }));
 }
 
 function renderWikiList() {
   const box = $('wiki-list');
   let list = wikiFilteredList();
-  // 保证当前选中的版本始终可见（可能不在截断的前若干条内）
+  
   if (wiki.selectedId && !list.some((v) => v.id === wiki.selectedId)) {
     const entry = wikiEntryOf(wiki.selectedId);
     const { ids, fab } = wikiInstalledSets();
@@ -1731,7 +1757,7 @@ function wikiShowBrief(id) {
     wikiFact('Fabric', !inst ? '—' : fab.has(id) ? '已安装' : '未安装');
   wikiSetView();
   renderWikiList();
-  // 让选中项滚入可见区域
+  
   const active = document.querySelector('.wiki-item.active');
   if (active) active.scrollIntoView({ block: 'nearest' });
 }
@@ -1750,7 +1776,7 @@ async function wikiShowDetail(id) {
     info = r && r.ok ? r.info : { error: (r && r.error) || '获取版本信息失败' };
     wiki.detailCache[id] = info;
   }
-  // 期间用户可能已切走
+  
   if (wiki.selectedId !== id || wiki.view !== 'detail') return;
   if (info.error) {
     $('wd-facts').innerHTML = `<div class="wd-fact"><span class="wf-label">出错了</span><span class="wf-value">${info.error}</span></div>`;
@@ -1777,8 +1803,6 @@ async function wikiShowDetail(id) {
   wikiLoadBrowser(id);
 }
 
-/* 站内百科：内嵌 webview 打开中文 Minecraft Wiki 词条
- * 中文站原生中文，无需翻译；中文词条缺失时主进程探测会自动回退英文站。 */
 async function wikiLoadBrowser(id) {
   const wrap = $('wd-browser');
   const view = $('wd-browser-view');
@@ -1795,7 +1819,7 @@ async function wikiLoadBrowser(id) {
     } catch { target = null; }
     wiki.targetCache[id] = target;
   }
-  // 期间用户可能已切走
+  
   if (wiki.selectedId !== id || wiki.view !== 'detail') return;
   if (!target || !target.url) {
     $('wd-browser-url').textContent = '未能定位词条，可点右上角 ↗ 在浏览器打开';
@@ -1803,7 +1827,7 @@ async function wikiLoadBrowser(id) {
   }
   $('wd-browser-label').textContent = target.lang === 'zh' ? '中文 Minecraft Wiki' : 'Minecraft Wiki（英文）';
   $('wd-browser-url').textContent = target.url;
-  // 同一 URL 不重复加载，避免切页时闪烁
+  
   if (view.getAttribute('src') !== target.url) {
     view.setAttribute('src', target.url);
   }
@@ -1813,16 +1837,15 @@ async function wikiLoadBrowser(id) {
   };
 }
 
-/* webview 加载完成后：跳过顶部大横幅，滚到正文（词条信息表）起始处 */
 function wikiBrowserOnReady() {
   const view = $('wd-browser-view');
   if (!view) return;
-  // 同一个 webview 会多次触发 dom-ready，这里按当前词条判断
+  
   view.addEventListener('dom-ready', async () => {
     const id = wiki.selectedId;
     if (!id || wiki.view !== 'detail') return;
     try {
-      // 等页面把信息表渲染出来
+      
       await new Promise((r) => setTimeout(r, 1200));
       const scrolled = await view.executeJavaScript(`
         (() => {
@@ -1842,14 +1865,13 @@ function wikiBrowserOnReady() {
         })()
       `);
       if (scrolled >= 0) {
-        // 滚完等一帧，确保内容已绘制
+        
         await new Promise((r) => setTimeout(r, 500));
       }
-    } catch { /* 页面还没准备好，下次 dom-ready 再试 */ }
+    } catch {}
   });
 }
 
-/* 官方更新日志：Mojang 源全文，页内直接渲染（主进程已做 HTML 白名单净化） */
 async function wikiLoadNotes(id) {
   const box = $('wd-notes');
   if (!box) return;
@@ -1864,14 +1886,14 @@ async function wikiLoadNotes(id) {
     } catch { notes = { found: false }; }
     wiki.detailCache[ck] = notes;
   }
-  if (wiki.selectedId !== id || wiki.view !== 'detail') return; // 加载期间已切走
+  if (wiki.selectedId !== id || wiki.view !== 'detail') return;
   if (notes && notes.found) {
     box.innerHTML =
       `<div class="wd-notes-head">官方更新日志 · ${esc(notes.entry.title || id)}</div>` +
       (notes.entry.image ? `<img class="wd-notes-img" src="${esc(notes.entry.image)}" alt="" loading="lazy" onerror="this.remove()" />` : '') +
       `<div class="wiki-doc">${notes.entry.body || ''}</div>`;
   } else {
-    // 官方源未收录（过老 / 预览版等）→ 收起正文区，保留外链兜底
+    
     box.hidden = true;
     box.innerHTML = '';
   }
@@ -1898,7 +1920,6 @@ function bindWikiPage() {
   $('wiki-back').onclick = () => { wiki.view = 'brief'; wikiSetView(); };
 }
 
-/* ================= 入口 ================= */
 bindUI();
 bindSettings();
 bindDownloadUI();
@@ -1913,9 +1934,7 @@ wikiBrowserOnReady();
 bindOnlinePage();
 refresh();
 if (typeof aiLoadConfig === 'function') aiLoadConfig();
-/* 预览 / 截图用：?modal=version / ?modal=account / ?modal=vsettings / ?modal=update 直接打开弹窗（方便截图看效果）；
- * ?modal=account&mstab=microsoft&mslogin=1 可打开微软标签页并模拟设备码登录流程。
- * Electron 调试同样生效（CUBE_PAGE 组合参数直达页面） */
+
 if (location.search.includes('modal=version')) setTimeout(openVersionModal, 350);
 if (location.search.includes('modal=account')) setTimeout(() => {
   openAccountModal();
@@ -1927,7 +1946,7 @@ if (location.search.includes('modal=account')) setTimeout(() => {
 }, 350);
 if (location.search.includes('modal=vsettings')) setTimeout(openVSettingsModal, 350);
 if (location.search.includes('modal=update')) setTimeout(() => checkUpdate(true), 500);
-/* URL 参数（Electron 与浏览器预览均生效）：?page=download|settings|wiki 直接打开页面；dlcat=mod 切分类；dlhover=1 列表载入后自动悬停第一项展示灰色详情面板 */
+
 (function () {
   const qs = new URLSearchParams(location.search);
   const page = qs.get('page');
@@ -1935,13 +1954,13 @@ if (location.search.includes('modal=update')) setTimeout(() => checkUpdate(true)
   setTimeout(() => {
     const nav = document.querySelector(`.nav-item[data-page="${page}"]`);
     if (nav) nav.click();
-    // 设置页：scat=game|launcher|account|about 切换左侧分类（截图 / 调试用）
+    
     const scat = qs.get('scat');
     if (page === 'settings' && scat) {
       const railBtn = document.querySelector(`.set-rail-item[data-scat="${scat}"]`);
       if (railBtn) railBtn.click();
     }
-    // Wiki 页：wtab=all|release|snapshot|old|installed 切选项卡；wikiv=1.20.1 选中版本（简略视图）；加 wikidetail=1 直接进详细视图
+    
     if (page === 'wiki') {
       const wtab = qs.get('wtab');
       if (wtab) {
@@ -1980,7 +1999,7 @@ if (location.search.includes('modal=update')) setTimeout(() => checkUpdate(true)
     if (cat) {
       const catBtn = document.querySelector(`.dl-cat[data-cat="${cat}"]`);
       if (catBtn) catBtn.click();
-      // 等分类列表载入后再悬停
+      
       const wait = setInterval(() => { if (dl.loaded && dl.items.length) { clearInterval(wait); openHover(); } }, 250);
     } else {
       openHover();
@@ -1988,7 +2007,6 @@ if (location.search.includes('modal=update')) setTimeout(() => checkUpdate(true)
   }, 400);
 })();
 
-/* 预览 / 截图用：?drop=1 展示拖拽遮罩；?droptype=1 展示 zip 类型选择弹窗 */
 (function () {
   const qs = new URLSearchParams(location.search);
   if (qs.get('drop')) $('drop-overlay').hidden = false;
@@ -1998,8 +2016,6 @@ if (location.search.includes('modal=update')) setTimeout(() => checkUpdate(true)
   }
 })();
 
-/* 全局错误兜底：渲染层任何未捕获异常都给出可见提示，
- * 避免「点了没反应」式的静默失败（如登录链路里的空引用） */
 window.addEventListener('error', (e) => {
   const msg = (e && e.message) || '未知错误';
   if (/Cannot set properties of null|Cannot read properties of null/.test(msg)) {
@@ -2011,15 +2027,11 @@ window.addEventListener('unhandledrejection', (e) => {
   toast('操作未完成：' + msg);
 });
 
-/* ================= 联机页（v1.7.0） =================
- * 流程：选已安装版本 → 游戏里开「对局域网开放」→ NCL 扫端口 → 起隧道 → 得到免费公网地址
- * 朋友那边：把地址粘进「加入联机」→ NCL 启动游戏并用 quickPlay 自动进服。
- */
 const online = {
-  versionId: '',      // 选中的已安装版本
-  port: '',          // 局域网端口
+  versionId: '',
+  port: '',
   provider: 'serveo',
-  address: '',       // 当前公网地址
+  address: '',
   running: false,
   logs: [],
 };
@@ -2031,7 +2043,6 @@ function onlineSetStatus(text, kind) {
   el.className = 'on-status' + (kind ? ' ' + kind : '');
 }
 
-/** 渲染已安装版本列表 */
 function onlineRenderVersions() {
   const box = $('on-versions');
   if (!box) return;
@@ -2052,7 +2063,7 @@ function onlineRenderVersions() {
     row.onclick = async () => {
       online.versionId = v.id;
       onlineRenderVersions();
-      // 用该版本启动游戏
+      
       const r = await api('game:launch', v.id);
       if (r && r.ok) {
         onlineSetStatus(`已启动 ${v.id}，请在游戏里「对局域网开放」，然后点「扫描端口」`);
@@ -2066,7 +2077,6 @@ function onlineRenderVersions() {
   }
 }
 
-/** 扫描本机找 MC 端口 */
 async function onlineScanPorts() {
   const result = $('on-scan-result');
   const btn = $('on-scan');
@@ -2092,13 +2102,11 @@ async function onlineScanPorts() {
   btn.disabled = false;
 }
 
-/** 切换穿透服务时显示/隐藏 ngrok token 输入 */
 function onlineSyncProviderRow() {
   const row = $('on-token-row');
   if (row) row.hidden = online.provider !== 'ngrok';
 }
 
-/** 启动隧道 */
 async function onlineStartTunnel() {
   const port = parseInt($('on-port-input').value || online.port, 10);
   if (!port || port < 1 || port > 65535) {
@@ -2136,9 +2144,8 @@ async function onlineStartTunnel() {
   btn.disabled = false;
 }
 
-/** 停止隧道 */
 async function onlineStopTunnel() {
-  try { await api('online:stopTunnel'); } catch { /* ignore */ }
+  try { await api('online:stopTunnel'); } catch {}
   online.running = false;
   online.address = '';
   $('on-address').textContent = '—';
@@ -2147,7 +2154,6 @@ async function onlineStopTunnel() {
   onlineSetStatus('隧道已停止');
 }
 
-/** 加入联机：填地址 → 启动游戏并自动进服 */
 async function onlineJoin() {
   const input = $('on-join-input').value.trim();
   const msg = $('on-join-msg');
@@ -2161,7 +2167,7 @@ async function onlineJoin() {
   msg.className = 'on-join-msg';
   msg.textContent = '正在连接…';
   try {
-    // 先探测对方是不是 MC 服务器
+    
     const probe = await api('online:probe', { address: input });
     if (probe && probe.ok && probe.result && probe.result.ok === false) {
       msg.className = 'on-join-msg err';
@@ -2169,7 +2175,7 @@ async function onlineJoin() {
       btn.disabled = false;
       return;
     }
-    // 直接进服：启动游戏并用 quickPlay 自动连接
+    
     const versionId = online.versionId || (state && state.settings && state.settings.selectedVersionId);
     if (!versionId) {
       msg.className = 'on-join-msg err';
@@ -2193,12 +2199,11 @@ async function onlineJoin() {
   btn.disabled = false;
 }
 
-/** 进入联机页 */
 async function onlineOpen() {
   if (!state) await refresh();
   onlineRenderVersions();
   onlineSyncProviderRow();
-  // 读回已保存的 ngrok token
+  
   try {
     const r = await api('online:getConfig');
     if (r && r.ok && r.config) {
@@ -2208,7 +2213,7 @@ async function onlineOpen() {
         onlineSyncProviderRow();
       }
       if (r.config.ngrokToken) $('on-token').value = r.config.ngrokToken;
-      // 若隧道还在跑，恢复显示
+      
       if (r.config.tunnel && r.config.tunnel.running && r.config.tunnel.address) {
         online.address = r.config.tunnel.address;
         online.running = true;
@@ -2218,10 +2223,9 @@ async function onlineOpen() {
         onlineSetStatus('隧道运行中（' + (r.config.tunnel.provider || '') + '）', 'ok');
       }
     }
-  } catch { /* ignore */ }
+  } catch {}
 }
 
-/** 绑定联机页交互 */
 function bindOnlinePage() {
   $('on-scan').onclick = onlineScanPorts;
   $('on-start').onclick = onlineStartTunnel;
@@ -2243,7 +2247,7 @@ function bindOnlinePage() {
       await navigator.clipboard.writeText(online.address);
       toast('已复制：' + online.address, true);
     } catch {
-      // 剪贴板不可用时退回到选中提示
+      
       const el = $('on-address');
       const range = document.createRange();
       range.selectNodeContents(el);

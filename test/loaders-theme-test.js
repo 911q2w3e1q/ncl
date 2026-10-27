@@ -1,4 +1,4 @@
-/* 模组加载器（Forge/NeoForge/Quilt）与主题（背景/强调色）测试 */
+/* 加载器与主题测试 */
 'use strict';
 process.env.CUBE_TEST_MODE = '1';
 const assert = require('assert');
@@ -17,7 +17,6 @@ async function tAsync(name, fn) {
   catch (e) { failed++; console.log(`FAIL  ${name}\n      ${e.message}`); }
 }
 
-/* ---------- installer Java 版本推导 ---------- */
 t('installerJavaMajor：按 MC 版本映射 Java 主版本', () => {
   assert.strictEqual(M.installerJavaMajor('1.12.2'), 8);
   assert.strictEqual(M.installerJavaMajor('1.16.5'), 8);
@@ -26,10 +25,9 @@ t('installerJavaMajor：按 MC 版本映射 Java 主版本', () => {
   assert.strictEqual(M.installerJavaMajor('1.20.1'), 17);
   assert.strictEqual(M.installerJavaMajor('1.21'), 21);
   assert.strictEqual(M.installerJavaMajor('1.21.4'), 21);
-  assert.strictEqual(M.installerJavaMajor('26.3'), 17); // 未知格式回退 17
+  assert.strictEqual(M.installerJavaMajor('26.3'), 17);
 });
 
-/* ---------- NeoForge 版本号前缀 ---------- */
 t('neoforgePrefix：MC 版本 → NeoForge 版本前缀', () => {
   assert.strictEqual(M.neoforgePrefix('1.20.2'), '20.2');
   assert.strictEqual(M.neoforgePrefix('1.20.4'), '20.4');
@@ -42,19 +40,17 @@ t('neoforgeForMC：按前缀过滤并降序（稳定版优先）', () => {
   const all = ['20.4.100', '20.4.99-beta', '21.0.1', '21.1.72', '20.2.8', '20.4.101-beta'];
   assert.deepStrictEqual(M.neoforgeForMC('1.20.4', all), ['20.4.100', '20.4.101-beta', '20.4.99-beta']);
   assert.deepStrictEqual(M.neoforgeForMC('1.21', all), ['21.0.1']);
-  assert.deepStrictEqual(M.neoforgeForMC('1.20.1', all), []); // NeoForge 不支持 1.20.1
+  assert.deepStrictEqual(M.neoforgeForMC('1.20.1', all), []);
   assert.deepStrictEqual(M.neoforgeForMC('1.21.1', all), ['21.1.72']);
 });
 
-/* ---------- 版本排序 ---------- */
 t('sortVersionsDesc：稳定版优先 + 数字段逐段比对', () => {
   assert.deepStrictEqual(M.sortVersionsDesc(['1.0.0', '1.2.0', '1.10.0', '2.0.0-beta']), ['1.10.0', '1.2.0', '1.0.0', '2.0.0-beta']);
   assert.deepStrictEqual(M.sortVersionsDesc(['47.1.3', '47.1.10', '47.0.19']), ['47.1.10', '47.1.3', '47.0.19']);
   assert.deepStrictEqual(M.sortVersionsDesc(['0.20.0-beta.9', '0.19.0']), ['0.19.0', '0.20.0-beta.9']);
-  assert.deepStrictEqual(M.sortVersionsDesc(['1.0', '1.0']), ['1.0']); // 去重
+  assert.deepStrictEqual(M.sortVersionsDesc(['1.0', '1.0']), ['1.0']);
 });
 
-/* ---------- Forge promotions 解析 ---------- */
 t('parseForgePromotions：recommended 优先于 latest', () => {
   const d = { promos: { '1.20.1-latest': '47.1.3', '1.20.1-recommended': '47.1.0', '1.19.2-latest': '43.3.13', '1.7.10-latest': '10.13.4.1614' } };
   assert.deepStrictEqual(M.parseForgePromotions(d), { '1.20.1': '47.1.0', '1.19.2': '43.3.13', '1.7.10': '10.13.4.1614' });
@@ -62,7 +58,6 @@ t('parseForgePromotions：recommended 优先于 latest', () => {
   assert.deepStrictEqual(M.parseForgePromotions(null), {});
 });
 
-/* ---------- 背景图校验 ---------- */
 t('validateBgFile：扩展名白名单 + 存在性', () => {
   assert.strictEqual(M.validateBgFile('/no/such/x.png').ok, false);
   assert.strictEqual(M.validateBgFile('/no/such/x.txt').error, '仅支持 PNG / JPG / WebP / BMP / GIF 图片');
@@ -73,7 +68,6 @@ t('validateBgFile：扩展名白名单 + 存在性', () => {
   fs.unlinkSync(tmp);
 });
 
-/* ---------- settings 主题字段往返 ---------- */
 const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ncl-theme-'));
 M.setGameRoot(testRoot);
 M.setLauncherDir(path.join(testRoot, 'launcher'));
@@ -137,7 +131,6 @@ t('detectLoader 经 listInstalled：fabric 旧数据兼容（_fabric 标记）',
   assert.strictEqual(v.fabric, true);
 });
 
-/* ---------- 网络源（软断言：通了验形状，不通跳过） ---------- */
 (async () => {
   await tAsync('listForgeVersions：BMCLAPI 源返回非空数组（网络软断言）', async () => {
     const vs = await M.listForgeVersions('1.20.1');

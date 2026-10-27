@@ -2,8 +2,6 @@
 /* 以远端当前 commit 为基线，把本地新增提交推到 GitHub（Git Data API）
  *
  * 用法：node tools/push-on-remote-base.js <分支> <文件...>
- * 场景：本地 origin/main 引用过期、git fetch 直连又很慢时，直接以远端
- * ref 指向的 commit 为 parent 建新 commit，避免历史重写。
  */
 'use strict';
 
@@ -25,7 +23,6 @@ function gh(args, input) {
   return out.trim() ? JSON.parse(out) : null;
 }
 
-/** 远端 ref 指向的 commit（若是 annotated tag 则解包到 commit） */
 function remoteHead() {
   const ref = gh(['api', `repos/${REPO}/git/ref/heads/${BRANCH}`]);
   let sha = ref.object.sha;

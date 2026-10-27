@@ -1,7 +1,6 @@
-/* 联机页 UI 测试：Electron + xvfb
+/* 联机页 UI 测试
  *
- * 用法：xvfb-run -a node_modules/.bin/electron --no-sandbox test/online-ui-test.js
- */
+ * 用法：xvfb-run -a node_modules/.bin/electron --no-sandbox test/online-ui-test.js */
 'use strict';
 
 const { app, BrowserWindow } = require('electron');
@@ -28,7 +27,7 @@ app.whenReady().then(async () => {
   await win.loadFile(path.join(ROOT, 'renderer', 'index.html'));
   await sleep(2000);
 
-  // 导航栏有「联机」入口，且在「Wiki 整合」之后
+  
   const nav = await win.webContents.executeJavaScript(`
     (() => {
       const items = [...document.querySelectorAll('.nav-item')];
@@ -45,7 +44,7 @@ app.whenReady().then(async () => {
     return w >= 0 && o > w;
   })(), nav.pages);
 
-  // 点开联机页
+  
   await win.webContents.executeJavaScript(`
     (() => { document.querySelector('.nav-item[data-page="online"]').click(); return true; })()
   `);
@@ -75,13 +74,13 @@ app.whenReady().then(async () => {
   check('加入联机输入框存在', pageVisible.hasJoin);
   check('加入按钮存在', pageVisible.hasJoinBtn);
 
-  // 穿透服务下拉有两个选项
+  
   const providers = await win.webContents.executeJavaScript(`
     (() => [...document.querySelectorAll('#on-provider option')].map(o => o.value))()
   `);
   check('提供方含 serveo 与 ngrok', providers.includes('serveo') && providers.includes('ngrok'), providers);
 
-  // 切到 ngrok → token 行显示；切回 serveo → 隐藏
+  
   const tokenRow = await win.webContents.executeJavaScript(`
     (async () => {
       const sel = document.getElementById('on-provider');
@@ -97,7 +96,7 @@ app.whenReady().then(async () => {
   check('选 ngrok 时显示 token 输入', tokenRow.shown === true, tokenRow);
   check('选 serveo 时隐藏 token 输入', tokenRow.hidden === true, tokenRow);
 
-  // 空端口点「开始穿透」→ 应提示而不是崩
+  
   const emptyPort = await win.webContents.executeJavaScript(`
     (async () => {
       document.getElementById('on-port-input').value = '';
@@ -112,7 +111,7 @@ app.whenReady().then(async () => {
   check('空端口给出错误提示', /端口/.test(emptyPort.status), emptyPort);
   check('错误提示带 err 样式', /err/.test(emptyPort.cls), emptyPort);
 
-  // 空地址点「加入」→ 应提示
+  
   const emptyJoin = await win.webContents.executeJavaScript(`
     (async () => {
       document.getElementById('on-join-input').value = '';
@@ -124,13 +123,13 @@ app.whenReady().then(async () => {
   `);
   check('空地址给出提示', /地址/.test(emptyJoin.text), emptyJoin);
 
-  // 剪贴板复制按钮初始应为禁用
+  
   const copyDisabled = await win.webContents.executeJavaScript(`
     (() => document.getElementById('on-copy').disabled)()
   `);
   check('无地址时复制按钮禁用', copyDisabled === true);
 
-  // 停止按钮初始隐藏
+  
   const stopHidden = await win.webContents.executeJavaScript(`
     (() => document.getElementById('on-stop').hidden)()
   `);

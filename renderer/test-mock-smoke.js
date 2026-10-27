@@ -1,4 +1,5 @@
-/* mock 模式冒烟：更新弹窗 / fabric 全量列表 / 迁移按钮显隐 / loader 页签 / 背景与主题色 */
+
+
 'use strict';
 const http = require('http');
 const fs = require('fs');
@@ -21,13 +22,13 @@ function check(name, cond) { console.log(`${cond ? 'PASS' : 'FAIL'}  ${name}`); 
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 800 });
 
-  // 1) 更新弹窗（mock 默认 hasUpdate:true）
+  
   await page.goto('http://127.0.0.1:38180/index.html?modal=update', { waitUntil: 'networkidle0' });
   await sleep(1200);
   await page.screenshot({ path: '/tmp/smoke/m1-update-modal.png' });
   check('更新弹窗可见', await page.$eval('#modal-update', (el) => !el.hidden));
 
-  // 2) 版本弹窗 → Fabric tab（验证全量列表）
+  
   await page.goto('http://127.0.0.1:38180/index.html?modal=version', { waitUntil: 'networkidle0' });
   await sleep(900);
   await page.$eval('.mtab[data-tab="fabric"]', (el) => el.click());
@@ -37,7 +38,7 @@ function check(name, cond) { console.log(`${cond ? 'PASS' : 'FAIL'}  ${name}`); 
   check('Fabric tab 行数 > 0', rowCount > 0);
   console.log('     Fabric tab 行数:', rowCount);
 
-  // 2b) Forge / NeoForge / Quilt 页签（catalog 展示 + 安装按钮带版本号）
+  
   for (const [tab, ver] of [['forge', '47.1.3'], ['neoforge', '21.4.100'], ['quilt', '0.29.3']]) {
     await page.$eval(`.mtab[data-tab="${tab}"]`, (el) => el.click());
     await sleep(600);
@@ -50,7 +51,7 @@ function check(name, cond) { console.log(`${cond ? 'PASS' : 'FAIL'}  ${name}`); 
     console.log(`     ${tab}: ${rows} 行，含版本号 ${withVer} 行，安装按钮 ${installBtns} 个`);
     if (tab === 'forge') await page.screenshot({ path: '/tmp/smoke/m2b-forge-tab.png' });
   }
-  // 2c) Forge 安装（mock 成功 → 行变「已装 Forge」）
+  
   await page.$eval('.mtab[data-tab="forge"]', (el) => el.click());
   await sleep(400);
   await page.$$eval('.ver-row .btn', (btns) => { const b = btns.find((x) => /^安装 Forge/.test(x.textContent)); if (b) b.click(); });
@@ -58,13 +59,13 @@ function check(name, cond) { console.log(`${cond ? 'PASS' : 'FAIL'}  ${name}`); 
   const forgeInstalled = await page.$$eval('.ver-row', (rows) => rows.filter((r) => r.textContent.includes('已装 Forge')).length);
   check('Forge 安装后出现「已装 Forge」行', forgeInstalled > 0);
 
-  // 3) 设置页启动器分类（mock gameRootPrev 非空 → 迁移按钮应可见）
+  
   await page.goto('http://127.0.0.1:38180/index.html?page=settings&scat=launcher', { waitUntil: 'networkidle0' });
   await sleep(900);
   check('迁移旧数据按钮可见', await page.$eval('#sp-btn-migrate-root', (el) => !el.hidden));
   await page.screenshot({ path: '/tmp/smoke/m3-settings-launcher.png' });
 
-  // 3b) 背景图片：mock 选择 → bg-layer 有背景 + body.has-bg + 恢复默认
+  
   await page.$eval('#sp-btn-pick-bg', (el) => el.click());
   await sleep(600);
   const bgOn = await page.evaluate(() => ({
@@ -88,7 +89,7 @@ function check(name, cond) { console.log(`${cond ? 'PASS' : 'FAIL'}  ${name}`); 
   }));
   check('恢复默认后背景层隐藏', bgOff.hidden && !bgOff.hasClass && !bgOff.resetVisible);
 
-  // 3c) 主题强调色：点青色 → CSS 变量与顶栏渐变更新
+  
   const accentBefore = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--accent').trim());
   await page.$eval('.set-swatch[data-accent="cyan"]', (el) => el.click());
   await sleep(300);
@@ -100,7 +101,7 @@ function check(name, cond) { console.log(`${cond ? 'PASS' : 'FAIL'}  ${name}`); 
   check('顶部导航栏使用主题色渐变', /linear-gradient/.test(accentAfter.topbarBg) && accentAfter.topbarBg.includes('rgb(6, 182, 212)'));
   await page.screenshot({ path: '/tmp/smoke/m3c-accent-cyan.png' });
 
-  // 3d) AI 报错分析面板：点「分析报错」→ 弹窗出现 → 原因/方案渲染 → 点「帮我解决」
+  
   await page.goto('http://127.0.0.1:38180/index.html', { waitUntil: 'networkidle0' });
   await sleep(900);
   await page.$eval('#log-details', (el) => { el.open = true; });
@@ -123,7 +124,7 @@ function check(name, cond) { console.log(`${cond ? 'PASS' : 'FAIL'}  ${name}`); 
   check('每条方案带「帮我解决」按钮', aiPanel.fixBtns >= 1);
   await page.screenshot({ path: '/tmp/smoke/m3d-ai-panel.png' });
 
-  // 点「帮我解决」→ 应调用 ai:applyActions 并提示
+  
   await page.$eval('#ai-solutions .ai-fix-btn', (el) => el.click());
   await sleep(1200);
   const aiApplied = await page.evaluate(() => ({
@@ -131,7 +132,7 @@ function check(name, cond) { console.log(`${cond ? 'PASS' : 'FAIL'}  ${name}`); 
   }));
   check('「帮我解决」触发自动处理', aiApplied.toast);
 
-  // 4) Wiki 详细视图（mock 补丁数据）
+  
   await page.goto('http://127.0.0.1:38180/index.html?page=wiki&wikiv=1.20.1&wikidetail=1', { waitUntil: 'networkidle0' });
   await sleep(1200);
   const docLen = await page.$eval('#wd-notes .wiki-doc', (el) => el.textContent.length).catch(() => -1);

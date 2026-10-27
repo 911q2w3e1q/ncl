@@ -1,4 +1,4 @@
-/* 崩溃规则引擎单元测试：node test/ai-rules-test.js */
+/* AI 规则引擎测试 */
 'use strict';
 
 const { analyzeByRules } = require('../main/ai-rules');

@@ -1,4 +1,4 @@
-/* 真实安装测试：完整走一遍 1.20.1 的安装流程（版本JSON/客户端/依赖库/资源/Java） */
+/* 版本安装流程测试 */
 'use strict';
 process.env.CUBE_TEST_MODE = '1';
 const ROOT = '/tmp/cube-test';

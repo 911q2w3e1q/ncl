@@ -1,10 +1,6 @@
 #!/usr/bin/env node
 /* 通过 GitHub Git Data API 推送提交与 tag
  *
- * 为什么不用 git push：沙箱内 git 的 HTTPS 走直连，被仓库侧规则/网络层拦截
- * （"push declined due to repository rule violations"，但仓库并无 ruleset、无分支保护），
- * 而 gh CLI 的 API 通道可用，所以改用 REST API 直接建 commit / ref。
- *
  * 用法：node tools/push-via-api.js <分支名> <tag名>
  */
 'use strict';
@@ -31,7 +27,6 @@ function git(args) {
   return execFileSync('git', args, { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).trim();
 }
 
-/** 收集工作区相对基线的变更（含新增、修改、删除） */
 function collectChanges() {
   const base = git(['rev-parse', `origin/${BRANCH}`]);
   const head = git(['rev-parse', 'HEAD']);
@@ -45,13 +40,11 @@ function collectChanges() {
   return { base, head, changes };
 }
 
-/** 创建 blob */
 function mkBlob(content) {
   const b64 = Buffer.from(content, 'utf8').toString('base64');
   return gh(['api', `repos/${REPO}/git/blobs`, '--input', '-'], JSON.stringify({ content: b64, encoding: 'base64' }));
 }
 
-/** 创建 tree（基于 base tree） */
 function mkTree(baseTree, changes) {
   const entries = [];
   for (const c of changes) {
@@ -86,15 +79,15 @@ function main() {
   }));
   console.log(`新 commit ${commit.sha.slice(0, 8)}`);
 
-  // 更新分支 ref
+  
   const cur = gh(['api', `repos/${REPO}/git/ref/heads/${BRANCH}`]);
   gh(['api', `repos/${REPO}/git/refs/heads/${BRANCH}`, '--method', 'PATCH', '--input', '-'],
     JSON.stringify({ sha: commit.sha, force: true }));
   console.log(`分支 ${BRANCH} 已更新`);
 
   if (TAG) {
-    // 打 tag（指向新 commit）
-    // 注意：tag object 与 tag ref 是两步，且 ref 必须用 POST git/refs（带 tag 名的那种路径会 422）
+    
+    
     const tagObj = gh(['api', `repos/${REPO}/git/tags`, '--input', '-'], JSON.stringify({
       tag: TAG,
       message: `NCL ${TAG}`,

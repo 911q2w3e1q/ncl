@@ -1,4 +1,4 @@
-/* Java 自动下载测试：安装 Mojang 官方 Java 25 运行时并验证可执行 */
+/* Java 运行时自动下载测试 */
 'use strict';
 process.env.CUBE_TEST_MODE = '1';
 const ROOT = '/tmp/cube-test';

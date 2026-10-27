@@ -1,7 +1,105 @@
-# NCL 开发交接文档（v1.7.0 开发中）
+# NCL 开发交接文档（v1.8.0 开发中）
 
-> 最后更新：2026-10-27（v1.7.0：手搓联机 —— 内网穿透 + 免费公网地址）
+> 最后更新：2026-10-27（v1.8.0：修复「双击黑屏」+ 还原 v1.5.0 打包形态）
 > 用途：会话上下文若被清理，新会话凭本文档 + 任务清单无缝接手。
+
+## 〇点八、v1.8.0 新增（修复双击黑屏 + 还原 v1.5.0 形态）
+
+**用户需求**：「从1.6.0开始，双击运行程序就打不开了，就是进程还在，但是全是黑屏，你还是还原1.5.0版本的样子，再搞这两个并且删除旧的」
+**用户追问**：「咱就是说有没有种可能你删掉了一个文件？就是那个54mb的文件你删的只剩几mb了」
+
+### 根因（已定位并有实测日志佐证）
+
+**症状**：双击 `NCL.exe` → 进程存活 → 窗口全黑 → 关进程管理器里的进程窗口才消失。
+
+**实测日志**（Electron 37.10.3，本机跑产物复现）：
+
+```
+ERROR:components/viz/service/main/viz_main_impl.cc:184] Exiting GPU process due to errors during initialization
+ERROR:ui/gl/angle_platform_impl.cc:49] ANGLE Display::initialize error 0: Internal Vulkan error (-3)
+ERROR:ui/gl/gl_display.cc:715] Initialization of all EGL display types failed.
+FATAL:electron/shell/browser/electron_browser_main_parts.cc:501] Failed to shutdown.
+```
+
+GPU 进程反复崩溃退出 → 渲染进程拿不到合成器 → **窗口全黑但进程不死**。
+
+**真正原因**：`tools/build-electron.js` 在 v1.6.0 引入的 `JUNK_FILES` 删除清单，把 GPU 进程初始化失败时的**软件回退路径**删干净了：
+
+| 被删文件 | 体积 | 作用 |
+|---|---|---|
+| `vk_swiftshader.dll` + `vk_swiftshader_icd.json` | 5.27 MB | SwiftShader 软件 Vulkan 渲染（GPU 不可用时的救命稻草） |
+| `vulkan-1.dll` | 0.88 MB | Vulkan 加载器 |
+| `dxcompiler.dll` + `dxil.dll` | 26.13 MB | D3D12 着色器编译 |
+| `ffmpeg.dll` | 2.90 MB | 音视频编解码 |
+| `LICENSES.chromium.html` | 14.56 MB | Chromium 许可全文 |
+| `locales/` 53 个语言包 | 41.50 MB | 界面语言（只剩 zh-CN / en-US） |
+| **合计** | **91.9 MB / 92 个文件** | |
+
+用户说的「54MB 变几 MB」= **locales 41.5 MB → 1.0 MB**（加上 GPU 那组 32.3 MB 全删）。
+
+> 注：Linux 版当时因为 `junkForPlatform()` 跳过了 `.so` 而侥幸没事，所以沙箱 Linux 上复现不出来；Windows 版被删了 `.dll`，才是重灾区。
+
+### 修复（三处）
+
+**① 打包层 —— 完全取消裁剪**（`tools/build-electron.js`）
+
+- `JUNK_FILES` 清空
+- `KEEP_LOCALES = null`（不裁剪 locales）
+- 逐文件校验：v1.5.0 的 106 个运行时文件在 v1.8.0 产物中**零缺失**
+
+**② 结构回退 —— 还原 v1.5.0 的发布形态**
+
+| | v1.5.0（可用） | v1.6.0–v1.7.0（黑屏） | v1.8.0 |
+|---|---|---|---|
+| 顶层 | `NCL.exe`（52KB 启动壳） | `NCL/NCL.exe`（Electron 本体） | `NCL.exe`（89KB 启动壳） |
+| 运行时 | `engine/`（完整） | `NCL/`（被裁剪） | `engine/`（完整） |
+| 应用代码 | `resources/app/` 目录 | `resources/app.asar` | `resources/app/` 目录 |
+| 未压缩 | 333.3 MB | 253.2 MB | 332.9 MB |
+
+- 顶层壳由 `tools/launcher.c` 经 MinGW 交叉编译（`x86_64-w64-mingw32-gcc -mwindows -municode -O2 -s`），带 `dotnet/NCL.NET/Resources/icon.ico` 图标
+- 新增 `buildLauncherShell()`：无 MinGW 工具链时自动退化为「顶层直接是 Electron 本体」，不阻断打包
+- `tools/launcher.c` 的查找目标从 `engine\electron.exe` 改为 `engine\NCL.exe`（与 engine 内实际文件名一致）
+- engine 内 `electron.exe` → `NCL.exe`（与 v1.5.0 一致，任务栏显示 NCL）
+- **asar 改回默认关闭**（`--asar` 可开），新增 `USE_ASAR` 开关
+- 修掉 `default_app.asar` 删除逻辑在 engine 结构下失效的问题（原来只删 `stageDir/resources/`）
+
+**③ 运行层 —— GPU 崩溃自动降级**（`main/main.js`）
+
+```javascript
+// app ready 之前
+if (process.argv.includes('--disable-gpu')) app.disableHardwareAcceleration();
+
+// ready 之后
+app.on('gpu-process-crashed', (_e, details) => {
+  gpuCrashCount += 1;
+  if (!gpuFallbackApplied && gpuCrashCount >= 3) {
+    gpuFallbackApplied = true;
+    app.relaunch({ args: process.argv.slice(1).concat(['--disable-gpu', '--disable-gpu-compositing']) });
+    app.exit(0);
+  }
+});
+```
+
+> `app.disableHardwareAcceleration()` 只在 ready 前有效，所以降级用 `app.relaunch()` 重启进程，而不是在崩溃回调里调。
+
+### 保留的功能（一个没删）
+
+- **v1.6.2 中文 Wiki 站内百科**：`<webview>` 内嵌 `zh.minecraft.wiki`（`Java版<版本号>` 词条）
+- **v1.7.0 联机页**：serveo（默认，免注册）/ ngrok（需 token）双通道，MC 端口严格识别
+
+### 产物
+
+| 资产 | 字节数 |
+|---|---|
+| NCL-1.8.0-win64.zip | 137,702,846 |
+
+zip 结构：`NCL.exe`（89KB 壳）+ `engine/`（完整运行时 + `resources/app/` + `resources/ai/`）
+
+### 测试
+
+core ✔ / ai-rules ✔ / ai-analyzer 34/34 ✔ / install ✔ / fabric-api 11/11 ✔ / wiki-browser 8/8 ✔ / loader-picker 16/16 ✔ / online 20/20 ✔ / online-ui 18/18 ✔（GUI 测试需 `xvfb-run -a node_modules/.bin/electron --no-sandbox test/<name>.js`，用 `node` 直接跑会报 `app` undefined）
+
+---
 
 ## 〇点七、v1.7.0 新增（联机页）
 

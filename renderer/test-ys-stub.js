@@ -1,5 +1,5 @@
-/* LittleSkin 复现用 window.cube stub（evaluateOnNewDocument 注入，先于 renderer.js 执行）
- * 忠实复刻主进程 account:loginYggdrasil / skin:fetch / getState 的行为与数据形状 */
+
+
 (function () {
   const YS_PORT = __YS_PORT__;
   const listeners = {};
@@ -40,7 +40,8 @@
           }
         }
       }
-    } catch (e) { /* 皮肤拉取失败不阻塞登录 */ }
+    } catch (e) { 
+ }
     return { id: 'ys-' + profile.id, type: 'yggdrasil', name: profile.name, uuid: profile.id, apiRoot, accessToken: auth.accessToken, clientToken, skinUrl, model };
   }
   window.cube = {

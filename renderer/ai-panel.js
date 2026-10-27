@@ -1,9 +1,3 @@
-/* NCL 渲染层：AI 报错分析面板
- * 负责：
- *  - 打开分析弹窗、渲染模型给出的原因与解决方案
- *  - 「帮我解决」按钮 → 调用主进程执行动作 → 应用成功后自动重启游戏验证
- *  - 设置页 AI 配置的读写与连通性测试
- */
 'use strict';
 
 const ai = {
@@ -12,8 +6,6 @@ const ai = {
   versionId: '',
   applying: false,
 };
-
-/* ---------------- 分析弹窗 ---------------- */
 
 function aiShowLoading(text) {
   $('ai-status').hidden = false;
@@ -47,7 +39,7 @@ function aiRenderResult(analysis, versionId) {
   confEl.textContent = { high: '把握较大', medium: '把握一般', low: '把握较小' }[conf] || conf;
   confEl.className = 'ai-confidence ai-conf-' + conf;
 
-  // 原因
+  
   const causes = Array.isArray(analysis.causes) ? analysis.causes : [];
   $('ai-causes-wrap').hidden = !causes.length;
   $('ai-causes').innerHTML = '';
@@ -60,7 +52,7 @@ function aiRenderResult(analysis, versionId) {
     $('ai-causes').appendChild(d);
   }
 
-  // 解决方案
+  
   const sols = Array.isArray(analysis.solutions) ? analysis.solutions : [];
   $('ai-solutions-wrap').hidden = !sols.length;
   $('ai-solutions').innerHTML = '';
@@ -107,7 +99,6 @@ function aiRenderResult(analysis, versionId) {
   }
 }
 
-/** 打开分析弹窗并请求分析 */
 async function aiAnalyze(trigger) {
   if (ai.analyzing) return;
   ai.analyzing = true;
@@ -127,7 +118,6 @@ async function aiAnalyze(trigger) {
   }
 }
 
-/** 「帮我解决」：执行动作 → 成功后自动重启游戏 */
 async function aiApplySolution(actions, btn) {
   if (ai.applying) return;
   if (!Array.isArray(actions) || !actions.length) {
@@ -149,12 +139,12 @@ async function aiApplySolution(actions, btn) {
       btn.disabled = false;
       return;
     }
-    // 展示变更
+    
     const lines = applied.map((a) => a.description || (a.action && a.action.type));
     toast(`已应用 ${applied.length} 项修改：${lines[0]}${lines.length > 1 ? ' 等' : ''}`);
     if (failed.length) toast(`有 ${failed.length} 项未能应用：${failed[0].error || ''}`);
 
-    // 自动重启游戏验证
+    
     const vid = ai.versionId || (state && state.selectedVersionId);
     if (vid) {
       btn.textContent = '正在重启验证…';
@@ -175,16 +165,12 @@ async function aiApplySolution(actions, btn) {
   }
 }
 
-/* ---------------- 设置页 AI 配置 ---------------- */
-
-/** 当前 AI 模式（cloud / local） */
 let aiMode = 'cloud';
-/** 本地模型列表缓存 */
+
 let aiLocalModels = [];
-/** 正在下载的模型 id */
+
 let aiDownloading = '';
 
-/** 格式化字节数 */
 function aiFmtSize(n) {
   const v = Number(n) || 0;
   if (v >= 1024 * 1024 * 1024) return `${(v / 1024 / 1024 / 1024).toFixed(2)} GB`;
@@ -193,7 +179,6 @@ function aiFmtSize(n) {
   return `${v} B`;
 }
 
-/** 切换设置页的显示（云端 / 本地） */
 function aiApplyModeUI() {
   const local = aiMode === 'local';
   const box = $('sp-ai-local-box');
@@ -206,7 +191,7 @@ function aiApplyModeUI() {
   if (base) base.hidden = local;
   if (key) key.hidden = local;
   if (model) model.hidden = local;
-  // 模式分段按钮高亮
+  
   const seg = $('sp-ai-mode');
   if (seg) {
     for (const b of seg.querySelectorAll('.seg-item')) {
@@ -218,7 +203,6 @@ function aiApplyModeUI() {
   if (autoCard) autoCard.hidden = false;
 }
 
-/** 渲染本地模型列表 */
 function aiRenderLocalModels() {
   const wrap = $('sp-ai-model-list');
   if (!wrap) return;
@@ -296,7 +280,6 @@ function aiRenderLocalModels() {
   }
 }
 
-/** 下载本地模型 */
 let aiDownloadPercent = 0;
 async function aiDownloadLocalModel(m) {
   if (aiDownloading) { toast('已有模型正在下载，请稍候'); return; }
@@ -321,7 +304,6 @@ async function aiDownloadLocalModel(m) {
   }
 }
 
-/** 拉取本地模型列表 */
 let aiLocalCurrentId = '';
 async function aiLoadLocalModels() {
   try {
@@ -331,7 +313,7 @@ async function aiLoadLocalModels() {
       aiLocalCurrentId = r.current || aiLocalCurrentId;
       if (aiMode === 'local') aiRenderLocalModels();
     }
-  } catch { /* 忽略 */ }
+  } catch {}
 }
 
 async function aiLoadConfig() {
@@ -404,22 +386,20 @@ async function aiTestConnection() {
   }
 }
 
-/* ---------------- 绑定 ---------------- */
-
 function bindAiPanel() {
-  // 日志区「分析报错」
+  
   const btn = $('btn-ai-analyze');
   if (btn) btn.addEventListener('click', () => aiAnalyze('manual'));
 
-  // 弹窗重新分析
+  
   const retry = $('ai-btn-retry');
   if (retry) retry.addEventListener('click', () => aiAnalyze('manual'));
 
-  // 设置页
+  
   $('sp-btn-ai-save').addEventListener('click', () => aiSaveConfig(false));
   $('sp-btn-ai-test').addEventListener('click', () => aiTestConnection());
 
-  // AI 模式切换（云端 / 本地）
+  
   const seg = $('sp-ai-mode');
   if (seg) {
     for (const b of seg.querySelectorAll('.seg-item')) {
@@ -438,7 +418,7 @@ function bindAiPanel() {
     }
   }
 
-  // 本地模型下载进度
+  
   onEvent('launcher://ai-local-progress', (payload) => {
     if (!payload || !payload.modelId) return;
     if (payload.modelId !== aiDownloading) return;
@@ -446,7 +426,7 @@ function bindAiPanel() {
     if (aiMode === 'local') aiRenderLocalModels();
   });
 
-  // 崩溃自动事件（主进程触发）
+  
   onEvent('launcher://ai-analysis', (payload) => {
     if (!payload) return;
     if (payload.ok) {
@@ -458,7 +438,7 @@ function bindAiPanel() {
     }
   });
 
-  // 崩溃但未启用自动分析时，提示用户可以手动分析
+  
   onEvent('launcher://game-crashed', () => {
     const hint = $('ai-analyze-hint');
     if (hint) {

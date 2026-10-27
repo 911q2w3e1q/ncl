@@ -7,9 +7,7 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <!-- 自定义背景层（设置页「更改背景…」后显示，ncl-bg:// 协议加载） -->
   <div id="bg-layer" hidden aria-hidden="true"></div>
-  <!-- 顶部红色导航栏（设计图：顶部通栏红线 + 刻度 = 导航项） -->
   <header id="topbar">
     <div class="brand">NCL</div>
     <nav class="nav-list">
@@ -40,13 +38,9 @@
       <button class="tb-btn tb-close" id="win-close" title="关闭"><svg viewBox="0 0 24 24" width="12" height="12"><path d="m6.4 5 5.6 5.6L17.6 5 19 6.4 13.4 12 19 17.6 17.6 19 12 13.4 6.4 19 5 17.6 10.6 12 5 6.4 6.4 5z" fill="currentColor"/></svg></button>
     </div>
   </header>
-
-  <!-- 主区域 -->
   <main id="main">
-    <!-- 游戏页 -->
     <section class="page active" id="page-game">
       <div class="game-grid">
-        <!-- 左列：中部按草图留白 + 底部操作行（蓝启动按钮 + 黄设置卡） -->
         <div class="game-left">
           <div class="spacer"></div>
           <div class="game-bottom">
@@ -61,7 +55,6 @@
               </button>
               <div class="launch-hint" id="launch-hint">未选择版本</div>
             </div>
-            <!-- 黄色版本设置卡（草图：底部中间小色块，点击打开设置） -->
             <div class="card card-settings" id="card-vsettings">
               <div class="vs-head">
                 <svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M19.4 13a7.8 7.8 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1l-.4-2.5h-4l-.4 2.5a7.6 7.6 0 0 0-1.7 1l-2.4-1-2 3.4L5.6 11a7.8 7.8 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.6 7.6 0 0 0 1.7 1l.4 2.5h4l.4-2.5a7.6 7.6 0 0 0 1.7-1l2.4 1 2-3.4-2-1.6ZM12 15.5A3.5 3.5 0 1 1 15.5 12 3.5 3.5 0 0 1 12 15.5Z"/></svg>
@@ -77,7 +70,6 @@
               </div>
             </div>
           </div>
-          <!-- 日志（折叠） -->
           <div class="card card-log">
             <details id="log-details">
               <summary>运行日志 <span class="log-count" id="log-count"></span></summary>
@@ -89,8 +81,6 @@
             </details>
           </div>
         </div>
-
-        <!-- 右列：紫账户卡 + 粉版本卡 -->
         <div class="game-right">
           <div class="card card-account" id="card-account">
             <div class="card-head">
@@ -113,7 +103,6 @@
               </div>
             </div>
           </div>
-
           <div class="card card-version" id="card-version">
             <div class="card-head">
               <h2>版本</h2>
@@ -133,11 +122,8 @@
         </div>
       </div>
     </section>
-
-    <!-- 下载页（设计图：粉色 6 分类 / 蓝色搜索框 / 黄色列表 / 灰色悬停详情） -->
     <section class="page" id="page-download">
       <div class="dl-wrap">
-        <!-- 粉色分类页签 -->
         <nav class="dl-cats" id="dl-cats">
           <button class="dl-cat active" data-cat="vanilla">
             <svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M12 2 3 7v10l9 5 9-5V7l-9-5Zm0 2.2 6.8 3.8L12 11.8 5.2 8 12 4.2ZM5 9.7l6 3.4v6.2l-6-3.3V9.7Zm8 9.6v-6.2l6-3.4v6.3l-6 3.3Z"/></svg>
@@ -164,8 +150,6 @@
             <span>光影包</span>
           </button>
         </nav>
-
-        <!-- 工具栏：来源 + 蓝色搜索框 + 筛选 -->
         <div class="dl-toolbar">
           <div class="dl-sources" id="dl-sources">
             <button class="src-btn active" data-source="modrinth" title="Modrinth 内容库">Modrinth</button>
@@ -190,8 +174,6 @@
           </div>
           <button class="btn-ghost btn-sm" id="dl-import" title="导入本地文件：用于 Modrinth 上没有的内容（如 CurseForge 独占模组 / 整合包），从网页下载后选择文件即可；整合包 zip 会自动解析安装">导入本地文件</button>
         </div>
-
-        <!-- 主体：黄色内容列表 + 灰色悬停详情面板 -->
         <div class="dl-body">
           <div class="card dl-list" id="dl-list-card">
             <div class="dl-list-head">
@@ -208,16 +190,12 @@
             <div class="dl-detail-body" id="dl-detail-body" hidden></div>
           </aside>
         </div>
-
-        <!-- 底部安装进度 -->
         <div class="dl-status" id="dl-status" hidden>
           <div class="dl-status-bar"><div class="dl-status-fill" id="dl-status-fill"></div></div>
           <span class="dl-status-text" id="dl-status-text"></span>
         </div>
       </div>
     </section>
-
-    <!-- 其他页面占位（等设计图） -->
     <section class="page" id="page-soon">
       <div class="soon-box">
         <svg viewBox="0 0 24 24" width="46" height="46"><path fill="currentColor" d="M12 2 3 7v10l9 5 9-5V7l-9-5Zm0 2.2 6.8 3.8L12 11.8 5.2 8 12 4.2ZM5 9.7l6 3.4v6.2l-6-3.3V9.7Zm8 9.6v-6.2l6-3.4v6.3l-6 3.3Z"/></svg>
@@ -226,8 +204,6 @@
         <button class="btn" id="btn-back-game">回到游戏页</button>
       </div>
     </section>
-
-    <!-- 设置页（结构参考 PCL：左侧分类导航 + 右侧设置卡片；配色换为 NCL 粉色系强调） -->
     <section class="page" id="page-settings">
       <div class="set-layout">
         <aside class="set-rail">
@@ -249,12 +225,9 @@
             <span>关于</span>
           </button>
         </aside>
-
         <div class="set-content">
-          <!-- 游戏设置 -->
           <div class="set-pane active" data-spane="game">
             <div class="set-group-title">游戏设置<span class="set-group-sub">全局默认 · 单个版本可在游戏页「版本设置」中覆盖</span></div>
-
             <div class="set-card">
               <div class="set-info"><div class="set-name">内存上限</div><div class="set-desc">分配给游戏的最大内存，大型模组包建议 4 GB 以上</div></div>
               <div class="set-ctrl set-ctrl-mem">
@@ -262,7 +235,6 @@
                 <b id="sp-memory-val">2 GB</b>
               </div>
             </div>
-
             <div class="set-card">
               <div class="set-info"><div class="set-name">Java 路径</div><div class="set-desc">默认按版本自动匹配，缺失时自动下载 Mojang 官方运行时</div></div>
               <div class="set-ctrl set-ctrl-java">
@@ -271,7 +243,6 @@
                 <button class="btn-ghost btn-sm" id="sp-btn-java-auto" hidden>恢复自动</button>
               </div>
             </div>
-
             <div class="set-card">
               <div class="set-info"><div class="set-name">窗口分辨率</div><div class="set-desc">游戏窗口大小，勾选全屏后忽略分辨率</div></div>
               <div class="set-ctrl set-ctrl-res">
@@ -282,28 +253,24 @@
                 <span class="set-toggle-label">全屏</span>
               </div>
             </div>
-
             <div class="set-card">
               <div class="set-info"><div class="set-name">JVM 启动参数</div><div class="set-desc">高级选项，仅在你知道作用时填写，多个参数用空格分隔</div></div>
               <div class="set-ctrl set-ctrl-wide">
                 <input type="text" id="sp-jvmargs" placeholder="例如 -XX:+UseG1GC" />
               </div>
             </div>
-
             <div class="set-card">
               <div class="set-info"><div class="set-name">版本隔离</div><div class="set-desc">每个版本的 Mod / 配置 / 存档独立存放，互不污染</div></div>
               <div class="set-ctrl">
                 <label class="set-toggle"><input type="checkbox" id="sp-isolation" /><span class="set-toggle-slider"></span></label>
               </div>
             </div>
-
             <div class="set-card">
               <div class="set-info"><div class="set-name">自动进入服务器</div><div class="set-desc">启动游戏后直接进入指定服务器，留空则正常启动（仅 1.20 及以上版本生效）</div></div>
               <div class="set-ctrl set-ctrl-wide">
                 <input type="text" id="sp-server" placeholder="IP:端口 或域名，例如 mc.hypixel.net" />
               </div>
             </div>
-
             <div class="set-card">
               <div class="set-info"><div class="set-name">下载加速</div><div class="set-desc">安装原版时走 BMCLAPI 镜像站，国内下载更快（Mod 等第三方内容始终走 Modrinth）</div></div>
               <div class="set-ctrl">
@@ -311,11 +278,8 @@
               </div>
             </div>
           </div>
-
-          <!-- 启动器 -->
           <div class="set-pane" data-spane="launcher">
             <div class="set-group-title">启动器</div>
-
             <div class="set-card">
               <div class="set-info"><div class="set-name">主题强调色</div><div class="set-desc">顶部导航栏、按钮与高亮的配色，点选即换</div></div>
               <div class="set-ctrl">
@@ -332,7 +296,6 @@
                 </div>
               </div>
             </div>
-
             <div class="set-card">
               <div class="set-info"><div class="set-name">背景图片</div><div class="set-desc">选择一张本地图片作为启动器背景；图片只存在本机 backgrounds 目录，不会上传</div></div>
               <div class="set-ctrl set-ctrl-wide">
@@ -341,7 +304,6 @@
                 <button class="btn-ghost btn-sm" id="sp-btn-reset-bg" hidden>恢复默认</button>
               </div>
             </div>
-
             <div class="set-card">
               <div class="set-info"><div class="set-name">游戏目录</div><div class="set-desc">版本、库、资源文件的存放位置；更改后旧目录数据可一键迁移过来</div></div>
               <div class="set-ctrl set-ctrl-wide">
@@ -351,23 +313,19 @@
                 <button class="btn-ghost btn-sm" id="sp-btn-migrate-root" hidden>迁移旧数据</button>
               </div>
             </div>
-
             <div class="set-card">
               <div class="set-info"><div class="set-name">检查更新</div><div class="set-desc">查看是否有新版本的启动器</div></div>
               <div class="set-ctrl">
                 <button class="btn-ghost btn-sm" id="sp-btn-check-update">检查更新</button>
               </div>
             </div>
-
             <div class="set-group-title">AI 报错分析</div>
-
             <div class="set-card">
               <div class="set-info"><div class="set-name">启用 AI 分析</div><div class="set-desc">游戏崩溃时自动调用 AI 分析原因并给出可一键应用的修复方案</div></div>
               <div class="set-ctrl">
                 <label class="set-toggle"><input type="checkbox" id="sp-ai-enabled" /><span class="set-toggle-slider"></span></label>
               </div>
             </div>
-
             <div class="set-card">
               <div class="set-info"><div class="set-name">AI 模式</div><div class="set-desc">「本地模型」使用启动器内置的小模型分析，完全离线、无需 API Key；「云端接口」使用你自己的 Key，质量更好</div></div>
               <div class="set-ctrl set-ctrl-wide">
@@ -377,42 +335,36 @@
                 </div>
               </div>
             </div>
-
             <div class="set-card" id="sp-ai-cloud-box">
               <div class="set-info"><div class="set-name">崩溃时自动分析</div><div class="set-desc">游戏异常退出后自动弹出分析结果；关闭后需在运行日志里手动点「分析报错」</div></div>
               <div class="set-ctrl">
                 <label class="set-toggle"><input type="checkbox" id="sp-ai-auto" checked /><span class="set-toggle-slider"></span></label>
               </div>
             </div>
-
             <div class="set-card" id="sp-ai-local-box" hidden>
               <div class="set-info"><div class="set-name">本地模型</div><div class="set-desc">选一个内置小模型并下载到本地，之后分析完全离线运行，不消耗任何额度。内置的规则引擎会先给出确定性的崩溃结论，小模型输出作为补充意见</div></div>
               <div class="set-ctrl set-ctrl-wide">
                 <div class="ai-model-list" id="sp-ai-model-list"></div>
               </div>
             </div>
-
             <div class="set-card" id="sp-ai-baseurl-card">
               <div class="set-info"><div class="set-name">API 地址</div><div class="set-desc">兼容任何 OpenAI 格式接口，如 https://api.openai.com/v1、https://api.deepseek.com/v1、https://open.bigmodel.cn/api/paas/v4</div></div>
               <div class="set-ctrl set-ctrl-wide">
                 <input type="text" id="sp-ai-baseurl" placeholder="https://api.openai.com/v1" />
               </div>
             </div>
-
             <div class="set-card" id="sp-ai-apikey-card">
               <div class="set-info"><div class="set-name">API Key</div><div class="set-desc">只保存在本机设置文件，不会上传到任何第三方</div></div>
               <div class="set-ctrl set-ctrl-wide">
                 <input type="password" id="sp-ai-apikey" placeholder="sk-…" />
               </div>
             </div>
-
             <div class="set-card" id="sp-ai-model-card">
               <div class="set-info"><div class="set-name">模型</div><div class="set-desc">模型名称，如 gpt-4o-mini、deepseek-chat、glm-4-flash</div></div>
               <div class="set-ctrl set-ctrl-wide">
                 <input type="text" id="sp-ai-model" placeholder="gpt-4o-mini" />
               </div>
             </div>
-
             <div class="set-card">
               <div class="set-info"><div class="set-name">测试连接</div><div class="set-desc">确认接口地址、Key 与模型可用</div></div>
               <div class="set-ctrl">
@@ -421,13 +373,10 @@
                 <button class="btn-ghost btn-sm" id="sp-btn-ai-test">测试连接</button>
               </div>
             </div>
-
             <div class="set-card set-card-info">
               <div class="set-info"><div class="set-name">内容来源</div><div class="set-desc">下载页内容来自 Modrinth（免 API Key）与 BMCLAPI 镜像站（加速原版下载）。CurseForge 独占内容可用下载页工具栏的「导入本地文件」装入。</div></div>
             </div>
           </div>
-
-          <!-- 账户 -->
           <div class="set-pane" data-spane="account">
             <div class="set-group-title">账户</div>
             <div class="set-card">
@@ -441,8 +390,6 @@
               <div class="set-ctrl set-ctrl-wide"><div class="set-account-list" id="sp-account-list"></div></div>
             </div>
           </div>
-
-          <!-- 关于 -->
           <div class="set-pane" data-spane="about">
             <div class="set-group-title">关于</div>
             <div class="set-card">
@@ -456,10 +403,8 @@
         </div>
       </div>
     </section>
-    <!-- Wiki 整合页（草图：紫=搜索、粉=版本列表、红=选项卡、灰=内容区；简略→详细两级视图） -->
     <section class="page" id="page-wiki">
       <div class="wiki-layout">
-        <!-- 左列：紫色搜索框 + 粉色版本列表 -->
         <aside class="wiki-left">
           <div class="wiki-search">
             <svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M10 4a6 6 0 1 1 0 12 6 6 0 0 1 0-12Zm0 2a4 4 0 1 0 0 8 4 4 0 0 0 0-8Zm6.9 8.6 4.3 4.2-1.4 1.4-4.2-4.2 1.3-1.4Z"/></svg>
@@ -467,8 +412,6 @@
           </div>
           <div class="wiki-list" id="wiki-list"></div>
         </aside>
-
-        <!-- 右列：红色选项卡 + 灰色内容区 -->
         <div class="wiki-right">
           <div class="wiki-tabs" id="wiki-tabs">
             <button class="wtab active" data-wtab="all">全部</button>
@@ -478,13 +421,11 @@
             <button class="wtab" data-wtab="installed">已安装</button>
           </div>
           <div class="wiki-content" id="wiki-content">
-            <!-- 空态引导 -->
             <div class="wiki-empty" id="wiki-empty">
               <svg viewBox="0 0 24 24" width="44" height="44"><path fill="currentColor" d="M4 4h6a2 2 0 0 1 2 2v14a2 2 0 0 0-2-2H4V4Zm16 0h-6a2 2 0 0 0-2 2v14a2 2 0 0 1 2-2h6V4Z"/></svg>
               <h3>从左侧搜索或选择游戏版本</h3>
               <p>输入版本号过滤列表，点击版本查看简略资料，再进入详细视图</p>
             </div>
-            <!-- 简略视图 -->
             <div class="wiki-brief" id="wiki-brief" hidden>
               <div class="wb-head">
                 <span class="wb-version" id="wb-version"></span>
@@ -496,7 +437,6 @@
                 查看详细资料
               </button>
             </div>
-            <!-- 详细视图 -->
             <div class="wiki-detail" id="wiki-detail" hidden>
               <div class="wd-head">
                 <button class="wiki-back" id="wiki-back">
@@ -507,7 +447,6 @@
               </div>
               <div class="wd-facts" id="wd-facts"></div>
               <div class="wd-notes" id="wd-notes" hidden></div>
-              <!-- 站内百科：内嵌浏览器直接渲染中文 Minecraft Wiki（原生中文，无需翻译） -->
               <div class="wd-browser" id="wd-browser">
                 <div class="wdb-bar">
                   <span class="wdb-label" id="wd-browser-label">中文 Minecraft Wiki</span>
@@ -530,11 +469,8 @@
         </div>
       </div>
     </section>
-
-    <!-- 联机页（v1.7.0）：开服 → 局域网 → 内网穿透 → 免费公网地址；另一端可输入地址直接进服 -->
     <section class="page" id="page-online">
       <div class="on-layout">
-        <!-- 左列：开服流程 -->
         <aside class="on-left">
           <div class="on-card">
             <div class="on-card-head">
@@ -546,7 +482,6 @@
             </div>
             <div class="on-versions" id="on-versions"></div>
           </div>
-
           <div class="on-card">
             <div class="on-card-head">
               <span class="on-step">2</span>
@@ -570,7 +505,6 @@
             </div>
             <div class="on-scan-result" id="on-scan-result"></div>
           </div>
-
           <div class="on-card">
             <div class="on-card-head">
               <span class="on-step">3</span>
@@ -600,8 +534,6 @@
             <button class="on-stop-btn" id="on-stop" hidden>停止穿透</button>
           </div>
         </aside>
-
-        <!-- 右列：公网地址 + 加入联机 -->
         <div class="on-right">
           <div class="on-card on-result-card">
             <div class="on-card-head">
@@ -618,7 +550,6 @@
             <div class="on-status" id="on-status">尚未开始</div>
             <div class="on-logs" id="on-logs"></div>
           </div>
-
           <div class="on-card">
             <div class="on-card-head">
               <span class="on-step on-step-join">↓</span>
@@ -637,8 +568,6 @@
       </div>
     </section>
   </main>
-
-  <!-- 版本选择弹窗 -->
   <div class="modal-mask" id="modal-version" hidden>
     <div class="modal">
       <div class="modal-head">
@@ -663,8 +592,6 @@
       </div>
     </div>
   </div>
-
-  <!-- 加载器选择弹窗（下载页点原版版本时弹出：先选加载器，再选加载器版本） -->
   <div class="modal-mask" id="modal-loader" hidden>
     <div class="modal">
       <div class="modal-head">
@@ -689,8 +616,6 @@
       </div>
     </div>
   </div>
-
-  <!-- 账户管理弹窗 -->
   <div class="modal-mask" id="modal-account" hidden>
     <div class="modal">
       <div class="modal-head">
@@ -742,8 +667,6 @@
       </div>
     </div>
   </div>
-
-  <!-- 版本设置弹窗（黄卡"详细设置"打开） -->
   <div class="modal-mask" id="modal-vsettings" hidden>
     <div class="modal">
       <div class="modal-head">
@@ -790,10 +713,7 @@
       </div>
     </div>
   </div>
-
   <div id="toast" hidden></div>
-
-  <!-- 检查更新弹窗 -->
   <div class="modal-mask" id="modal-update" hidden>
     <div class="modal modal-sm">
       <div class="modal-head">
@@ -820,8 +740,6 @@
       </div>
     </div>
   </div>
-
-  <!-- AI 报错分析弹窗 -->
   <div class="modal-mask" id="modal-ai" hidden>
     <div class="modal modal-ai">
       <div class="modal-head">
@@ -842,12 +760,10 @@
             </div>
             <div class="ai-summary" id="ai-summary"></div>
           </div>
-
           <div class="ai-section" id="ai-causes-wrap" hidden>
             <div class="ai-section-title">可能的原因</div>
             <div class="ai-causes" id="ai-causes"></div>
           </div>
-
           <div class="ai-section" id="ai-solutions-wrap" hidden>
             <div class="ai-section-title">解决办法 <span class="ai-section-sub">点「帮我解决」自动应用并重启游戏验证</span></div>
             <div class="ai-solutions" id="ai-solutions"></div>
@@ -861,8 +777,6 @@
       </div>
     </div>
   </div>
-
-  <!-- 拖拽导入遮罩（拖动文件到窗口时显示，PCL 式拖放加载） -->
   <div class="drop-overlay" id="drop-overlay" hidden>
     <div class="drop-box">
       <svg viewBox="0 0 24 24" width="52" height="52"><path fill="currentColor" d="M12 3a1 1 0 0 1 1 1v9.6l2.3-2.3 1.4 1.4-4.7 4.7-4.7-4.7 1.4-1.4L11 13.6V4a1 1 0 0 1 1-1ZM5 19h14v2H5v-2Z"/></svg>
@@ -870,8 +784,6 @@
       <div class="drop-sub">.jar → Mod&emsp;·&emsp;.zip / .mrpack → 整合包 / 资源包 / 光影包 / 数据包</div>
     </div>
   </div>
-
-  <!-- 拖拽 zip 类型选择弹窗 -->
   <div class="modal-mask" id="modal-drop-type" hidden>
     <div class="modal modal-sm">
       <div class="modal-head">
@@ -901,7 +813,6 @@
       </div>
     </div>
   </div>
-
   <script src="ai-panel.js"></script>
   <script src="renderer.js"></script>
 </body>
