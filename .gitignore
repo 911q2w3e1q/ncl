@@ -11,3 +11,4 @@ dotnet/**/obj/
 # 构建产物：ai/ai-runtime.js 由 `npm run build:ai-runtime` 生成
 # （1.2MB 压缩 bundle 会被 GitHub secret scanning 误判为密钥，且本可随时重建）
 ai/ai-runtime.js
+main.js

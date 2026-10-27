@@ -24,7 +24,7 @@ const wikiProbe = require('./wiki-probe');
 const onlineTunnel = require('./online-tunnel');
 
 const LAUNCHER_NAME = 'NCL';
-const LAUNCHER_VERSION = '1.7.0';
+const LAUNCHER_VERSION = '1.9.0';
 const MANIFEST_URL = 'https://piston-meta.mojang.com/mc/game/version_manifest_v2.json';
 const JAVA_MANIFEST_URL = 'https://launchermeta.mojang.com/v1/products/java-runtime/2ec0cc96c44e5a76b9c8b7c39df7210883d12871/all.json';
 const GITHUB_REPO = '911q2w3e1q/ncl';
@@ -38,6 +38,15 @@ if (protocol && typeof protocol.registerSchemesAsPrivileged === 'function') {
   protocol.registerSchemesAsPrivileged([
     { scheme: 'ncl-ai', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } },
   ]);
+}
+
+/* 【v1.8.0 黑屏修复】软件渲染兜底
+ * GPU 进程连续崩溃时 main.js 会用 --disable-gpu 重启进程，
+ * 这里在 app ready 之前把硬件加速关掉，保证软件渲染真正生效（窗口不再全黑）。 */
+if (process.argv.includes('--disable-gpu')) {
+  try {
+    app.disableHardwareAcceleration();
+  } catch { /* Node 测试环境忽略 */ }
 }
 
 /* ---------------- 路径 ----------------
@@ -145,6 +154,32 @@ function saveJSON(p, obj) {
   const tmp = p + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(obj, null, 2));
   fs.renameSync(tmp, p);
+}
+
+/** 确保游戏根目录里有 launcher_profiles.json。
+ *  Forge / NeoForge 官方安装器会检查这个文件是否存在，缺失就报
+ *  "There is no minecraft launcher profile in <dir>" 并直接失败。
+ *  NCL 自己管理版本，不生成这个文件，所以跑安装器前补一个最小可用的。 */
+function ensureLauncherProfiles(root) {
+  const p = path.join(root, 'launcher_profiles.json');
+  if (exists(p)) {
+    // 已存在但可能缺 profiles 字段，补齐后再放行
+    const j = loadJSON(p, {});
+    if (j && typeof j === 'object' && j.profiles && typeof j.profiles === 'object') return;
+    if (j && typeof j === 'object') {
+      j.profiles = j.profiles || {};
+      j.authentication = j.authentication || { available_profiles: [], selected_profile: null };
+      saveJSON(p, j);
+      return;
+    }
+  }
+  saveJSON(p, {
+    profiles: {},
+    selectedProfile: null,
+    clientVersion: null,
+    authentication: { available_profiles: [], selected_profile: null },
+    launcherVersion: { name: LAUNCHER_NAME, version: LAUNCHER_VERSION, legacy: true },
+  });
 }
 
 function sha1File(p) {
@@ -328,10 +363,12 @@ function readLocalVersionJSON(id) {
 /** 从版本 JSON 的依赖库识别模组加载器类型 */
 function detectLoader(j) {
   const names = (j.libraries || []).map((l) => l.name || '');
-  if (j._fabric || names.some((n) => /^net\.fabricmc:fabric-loader:/.test(n))) return 'fabric';
+  // 【bug 修复】识别顺序：先判 Quilt / NeoForge / Forge，再判 Fabric。
+  // Quilt 沿用了 Knot 启动器，mainClass 与 Fabric 形近；若先判 Fabric 容易把 Quilt 误判成 Fabric。
+  if (names.some((n) => /^org\.quiltmc:quilt-loader:/.test(n))) return 'quilt';
   if (names.some((n) => /^net\.neoforged:/.test(n))) return 'neoforge';
   if (names.some((n) => /^net\.minecraftforge:/.test(n))) return 'forge';
-  if (names.some((n) => /^org\.quiltmc:quilt-loader:/.test(n))) return 'quilt';
+  if (j._fabric || names.some((n) => /^net\.fabricmc:fabric-loader:/.test(n))) return 'fabric';
   return null;
 }
 /** 加载器版本对应的 MC 版本（继承型 JSON 取 inheritsFrom，否则从 id 前缀解析） */
@@ -930,11 +967,18 @@ function applicableLibraries(versionJSON) {
     } else {
       const p = mavenToPath(lib.name);
       if (p) {
-        // 无显式下载地址时按镜像依次尝试（BMCLAPI / 原版库 / Fabric maven）
+        /* 无显式下载地址时按镜像依次尝试。
+         * 【bug 修复】Quilt 的库在 quiltmc 自己的 maven 里，原代码只挂了
+         * BMCLAPI / libraries.minecraft.net / maven.fabricmc.net 三个源，
+         * 下载 org.quiltmc:quilt-loader 时全部 404 → Quilt 装不上。
+         * 这里按 group 追加对应的官方 maven。 */
+        const mirrors = [`${BMCLAPI_MAVEN}/${p}`, `https://libraries.minecraft.net/${p}`];
+        if (/^net\.fabricmc:/.test(lib.name || '')) mirrors.push(`https://maven.fabricmc.net/${p}`);
+        if (/^org\.quiltmc:/.test(lib.name || '')) mirrors.push(`${QUILT_MAVEN}/${p}`);
         out.push({
           lib,
-          artifact: { path: p, url: `${BMCLAPI_MAVEN}/${p}` },
-          mirrors: [`${BMCLAPI_MAVEN}/${p}`, `https://libraries.minecraft.net/${p}`, `https://maven.fabricmc.net/${p}`],
+          artifact: { path: p, url: mirrors[0] },
+          mirrors,
         });
       }
     }
@@ -946,16 +990,41 @@ function applicableLibraries(versionJSON) {
 function mergeVersionJSON(parent, child) {
   const merged = { ...parent, ...child };
   merged.id = child.id;
-  merged.libraries = [...(parent.libraries || []), ...(child.libraries || [])];
-  // arguments 深度合并：jvm 段拼接，game 段子版本非空才覆盖
+  // 【bug 修复】合并后必须保留子版本的 inheritsFrom。
+  // 父版本没有 inheritsFrom 字段，展开 {...parent, ...child} 会把它抹掉，
+  // 导致下次再走合并分支时找不到父版本依据、且 mcOfLoaderVersion 解析不出 MC 版本号。
+  if (child.inheritsFrom) merged.inheritsFrom = child.inheritsFrom;
+  // libraries 去重合并：父版本库 + 子版本库，同名（同一 maven 坐标）只保留一条。
+  // 【修复】原来用 name|sha1 做键，同名但 sha1 不同的条目会重复保留，重复合并时会越滚越多。
+  const libSeen = new Set();
+  merged.libraries = [...(parent.libraries || []), ...(child.libraries || [])].filter((l) => {
+    const key = l.name || JSON.stringify(l);
+    if (libSeen.has(key)) return false;
+    libSeen.add(key);
+    return true;
+  });
+  // arguments 深度合并：jvm 段拼接，game 段子版本非空才覆盖。
+  // 【bug 修复】拼接必须按「序列化后的项」去重，否则对同一份 json 二次合并时
+  // arguments.jvm 会 11 → 27 → 38 无限累加，最终参数重复导致启动异常。
   if (parent.arguments || child.arguments) {
+    const uniq = (a, b) => {
+      const seen = new Set();
+      const out = [];
+      for (const it of [...a, ...b]) {
+        const key = JSON.stringify(it);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(it);
+      }
+      return out;
+    };
     const pj = (parent.arguments && parent.arguments.jvm) || [];
     const cj = (child.arguments && child.arguments.jvm) || [];
     const pg = (parent.arguments && parent.arguments.game) || [];
     const cg = (child.arguments && child.arguments.game) || [];
     merged.arguments = {
-      jvm: [...pj, ...cj],
-      game: cg.length ? [...pg, ...cg] : pg,
+      jvm: uniq(pj, cj),
+      game: cg.length ? uniq(pg, cg) : pg,
     };
   }
   merged.minecraftArguments = child.minecraftArguments || parent.minecraftArguments;
@@ -963,8 +1032,33 @@ function mergeVersionJSON(parent, child) {
   merged.assetIndex = child.assetIndex || parent.assetIndex;
   merged.assets = child.assets || parent.assets;
   merged.logging = child.logging || parent.logging;
-  merged._fabric = true;
+  /* _fabric 只在「确实是 Fabric profile」时打标。
+   * 【bug 修复】原先这里无条件 merged._fabric = true，导致 Forge / NeoForge / Quilt
+   * 官方安装器生成的版本（它们同样带 inheritsFrom，同样走这个合并分支）
+   * 被 detectLoader 判成 'fabric' → 界面上显示成「已装 Fabric」，
+   * 按钮走安装器分支被禁用，用户再也点不动这个版本。 */
+  if (child._fabric || isFabricProfile(child)) merged._fabric = true;
+  else delete merged._fabric;
+  /* 打上「已合并」标记，落盘后再次 installVersion 同一版本时会短路合并分支，
+   * 避免 arguments/libraries 被反复拼接（虽然已做去重，双保险）。 */
+  merged._merged = true;
   return merged;
+}
+
+/** 判断一个版本 JSON 是否为 Fabric profile（按 mainClass / fabric-loader 库特征识别） */
+function isFabricProfile(j) {
+  if (!j) return false;
+  // 先排除 Quilt / NeoForge / Forge：它们的 mainClass 同样含 "knot"（Quilt 沿用了 Knot 启动器），
+  // 不排除会把 Quilt 误判成 Fabric，界面上显示成「已装 Fabric」。
+  const names = (j.libraries || []).map((l) => l.name || '');
+  if (names.some((n) => /^org\.quiltmc:quilt-loader:/.test(n))) return false;
+  if (names.some((n) => /^net\.neoforged:/.test(n))) return false;
+  if (names.some((n) => /^net\.minecraftforge:/.test(n))) return false;
+  const mc = String(j.mainClass || '');
+  if (/quiltmc|neoforged|minecraftforge/i.test(mc)) return false;
+  // Fabric 特征：库里有 net.fabricmc:fabric-loader，或 mainClass 明确是 net.fabricmc.*
+  if (names.some((n) => /^net\.fabricmc:fabric-loader:/.test(n))) return true;
+  return /^net\.fabricmc\./i.test(mc);
 }
 
 /** 带镜像回退的库下载（Fabric 的库在 maven.fabricmc.net，原版库在 libraries.minecraft.net） */
@@ -999,8 +1093,13 @@ async function installVersion(versionId, onProgress, mirrorBase = null) {
     }
     ensureDir(vdir);
     saveJSON(path.join(vdir, `${versionId}.json`), vjson);
-  } else if (vjson.inheritsFrom && !vjson._fabric) {
-    // installFabric 预写的 profile：与父版本合并
+  } else if (vjson.inheritsFrom && !vjson._merged) {
+    /* 预写的继承型 profile（Fabric / Forge / NeoForge / Quilt）：与父版本合并。
+     * 【bug 修复】原来用 !vjson._fabric 判定「是否已合并」，
+     * 但 _fabric 现在只表示「这是不是 Fabric」（Forge 等同样会被合并却不是 Fabric），
+     * 一旦给预写 profile 打上 _fabric 就会永远进不了这个分支 → 父版本的
+     * downloads / assetIndex / javaVersion 全丢 → 装出来的版本启动即崩。
+     * 改用独立的 _merged 标记表示「父版本已内联过」。 */
     const manifest = await getManifest();
     const pe = manifest.versions.find((v) => v.id === vjson.inheritsFrom);
     if (pe) {
@@ -1149,10 +1248,16 @@ async function installFabric(mcVersion, onProgress, wantVersion = '', opts = {})
     `${FABRIC_META_MIRROR}/versions/loader/${enc}/${encodeURIComponent(loader)}/profile/json`,
   ]);
   profile.id = `fabric-loader-${loader}-${mcVersion}`;
+  // 预写 profile 时就打上 _fabric 标记：
+  // installVersion 里对「本地已有 json 且带 inheritsFrom」的版本会走合并分支，
+  // 合并结果靠这个标记维持 Fabric 身份（否则合并后会被当成普通继承版本）。
+  profile._fabric = true;
   const vdir = path.join(paths().versions, profile.id);
   ensureDir(vdir);
   saveJSON(path.join(vdir, `${profile.id}.json`), profile);
   const result = await installVersion(profile.id, onProgress);
+  // 把新装好的实例 id 带回给渲染层：装完自动选中，用户不必再手动找一遍
+  result.id = profile.id;
 
   // Fabric API 是 Fabric 模组的必需依赖库，默认顺手装上（可在 UI 上关闭）
   if (opts.withFabricApi !== false) {
@@ -1176,6 +1281,8 @@ const FORGE_MIRROR = 'https://bmclapi2.bangbang93.com/forge';
 const NEOFORGE_MAVEN_API = 'https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge';
 const QUILT_META = 'https://meta.quiltmc.org/v3';
 const QUILT_MAVEN = 'https://maven.quiltmc.org/repository/release';
+/** Quilt 官方 installer 版本（与 quilt-loader 版本无关，仓库里现存最高为 0.15.1） */
+const QUILT_INSTALLER_VER = '0.15.1';
 const LOADER_LABELS = { forge: 'Forge', neoforge: 'NeoForge', quilt: 'Quilt' };
 
 /** 版本号降序：稳定版排前，数字段逐段比对（支持 1.20.1-47.1.3 / 47.1.3 / 0.20.0-beta.9 混合） */
@@ -1298,9 +1405,19 @@ function installerUrls(kind, mc, ver) {
     ];
   }
   if (kind === 'neoforge') {
-    return [`https://maven.neoforged.net/net/neoforged/neoforge/${ver}/neoforge-${ver}-installer.jar`];
+    return [
+      `https://bmclapi2.bangbang93.com/maven/net/neoforged/neoforge/${ver}/neoforge-${ver}-installer.jar`,
+      `https://maven.neoforged.net/releases/net/neoforged/neoforge/${ver}/neoforge-${ver}-installer.jar`,
+    ];
   }
-  return [`${QUILT_MAVEN}/org/quiltmc/quilt-installer/${ver}/quilt-installer-${ver}.jar`];
+  /* 【bug 修复】Quilt 的 installer 版本号与 quilt-loader 版本号是两套独立版本。
+   * 老代码直接用 loader 版本号拼坐标（quilt-installer-0.23.0.jar），
+   * 而仓库里 quilt-installer 最高只到 0.15.1 → 必然 404，装不上。
+   * 这里固定用仓库里存在的最新 installer 版本，loader 版本由命令行参数单独传。 */
+  return [
+    `${QUILT_MAVEN}/org/quiltmc/quilt-installer/${QUILT_INSTALLER_VER}/quilt-installer-${QUILT_INSTALLER_VER}.jar`,
+    `https://bmclapi2.bangbang93.com/maven/org/quiltmc/quilt-installer/${QUILT_INSTALLER_VER}/quilt-installer-${QUILT_INSTALLER_VER}.jar`,
+  ];
 }
 
 /** 运行官方 installer：跑前记录版本目录，跑后识别新增的 version id，再补跑 installVersion 补齐资源/Java */
@@ -1310,18 +1427,48 @@ async function runLoaderInstaller(kind, jarPath, mc, loaderVer, onProgress) {
   onProgress({ stage: 'loader', message: `运行 ${LOADER_LABELS[kind]} 安装器（Java ${java.major}${java.source === 'system' ? '，系统' : '，已自动下载'}）…`, percent: 40, speed: 0 });
   ensureDir(P.versions);
   const before = new Set(fs.readdirSync(P.versions));
-  const args = kind === 'quilt'
-    ? ['-jar', jarPath, 'install', 'client', mc, loaderVer, '--install-dir', P.root]
-    : ['-jar', jarPath, '--installClient', '--mc-dir', P.root];
-  const out = await new Promise((resolve) => {
-    execFile(java.path, args, { maxBuffer: 32 * 1024 * 1024, timeout: 15 * 60 * 1000 }, (err, stdout, stderr) => {
-      resolve({ err, text: String(stdout || '') + String(stderr || '') });
+
+  /* 【bug 修复】Forge / NeoForge 的官方安装器要求目标目录里存在 launcher_profiles.json，
+   * 否则直接报 "There is no minecraft launcher profile in <dir>, you need to run the launcher first!"
+   * 然后直接失败退出。NCL 不是 Mojang 启动器、不会生成这个文件，
+   * 所以跑安装器前先补一个最小可用的。 */
+  ensureLauncherProfiles(P.root);
+
+  /* 不同加载器的官方安装器命令行参数完全不同，这里逐个尝试直到成功：
+   *   Quilt  : install client <mc> <loader> --install-dir=<dir>
+   *   Forge 老版 (≤1.20.1, SimpleInstaller): --installClient <dir>
+   *   Forge/NeoForge 新版 (≥1.20.2): --installClient <dir> --installDir <dir>
+   *   老代码统一用 ['--installClient','--mc-dir',dir]，
+   *   在 Forge 1.20.1 上直接抛 UnrecognizedOptionException: mc-dir is not a recognized option。
+   */
+  const argSets = kind === 'quilt'
+    ? [
+      ['-jar', jarPath, 'install', 'client', mc, loaderVer, `--install-dir=${P.root}`],
+      ['-jar', jarPath, 'install', 'client', mc, loaderVer, '--install-dir', P.root],
+    ]
+    : [
+      ['-jar', jarPath, '--installClient', P.root],
+      ['-jar', jarPath, '--installClient', P.root, '--installDir', P.root],
+      ['-jar', jarPath, '--installClient', '--mc-dir', P.root],
+    ];
+
+  let newId = '';
+  let lastOut = '';
+  for (const args of argSets) {
+    const out = await new Promise((resolve) => {
+      execFile(java.path, args, { maxBuffer: 32 * 1024 * 1024, timeout: 15 * 60 * 1000 }, (err, stdout, stderr) => {
+        resolve({ err, text: String(stdout || '') + String(stderr || '') });
+      });
     });
-  });
-  const created = fs.readdirSync(P.versions).filter((v) => !before.has(v));
-  const newId = created.find((v) => exists(path.join(P.versions, v, `${v}.json`))) || created[0];
+    lastOut = out.text || (out.err ? out.err.message : '');
+    const created = fs.readdirSync(P.versions).filter((v) => !before.has(v));
+    newId = created.find((v) => exists(path.join(P.versions, v, `${v}.json`))) || created[0] || '';
+    if (newId) break; // 成功产出新版本目录
+    // 没产出 → 多半是参数不被识别，换下一套参数重试
+    onProgress({ stage: 'loader', message: '安装器未识别当前参数，换用其它参数重试…', percent: 40, speed: 0 });
+  }
   if (!newId) {
-    throw new Error(`${LOADER_LABELS[kind]} 安装器未生成新版本${out.text ? `：${out.text.slice(-400)}` : ''}${out.err ? `（${out.err.message}）` : ''}`);
+    throw new Error(`${LOADER_LABELS[kind]} 安装器未生成新版本${lastOut ? `：${lastOut.slice(-400)}` : ''}`);
   }
   // installer 只写 version json 并下载自身依赖库；补跑 installVersion 幂等补齐资源 / Java
   await installVersion(newId, onProgress);
@@ -2013,7 +2160,10 @@ async function updaterDownload(onProgress) {
 /** 平台更新脚本：等待旧进程退出 → 用 stage 里的新文件覆盖 → 重启启动器 */
 function buildUpdaterScript(kind, stage, target, pid) {
   if (kind === 'bat') {
-    return `@echo off\r\nchcp 65001 >nul\r\n:wait\r\ntasklist /FI "PID eq ${pid}" 2>nul | find /i "${pid}" >nul\r\nif not errorlevel 1 (timeout /t 1 /nobreak >nul & goto wait)\r\nxcopy "${stage}" "${target}" /E /I /H /Y /Q >nul\r\nstart "" "${target}\\NCL.exe"\r\n`;
+    // 先删掉旧的 engine 目录再复制，避免新旧运行时混在一起
+    // （v1.6.x – v1.7.0 是「顶层 electron.exe」，v1.8.0 是「顶层壳 + engine/」，
+    //  结构变了必须整体替换）
+    return `@echo off\r\nchcp 65001 >nul\r\n:wait\r\ntasklist /FI "PID eq ${pid}" 2>nul | find /i "${pid}" >nul\r\nif not errorlevel 1 (timeout /t 1 /nobreak >nul & goto wait)\r\nif exist "${target}\\engine" rmdir /S /Q "${target}\\engine"\r\nxcopy "${stage}" "${target}" /E /I /H /Y /Q >nul\r\nstart "" "${target}\\NCL.exe"\r\n`;
   }
   // sh（Linux / macOS 通用）
   const relaunch = kind === 'sh-mac' ? `open "${target}"` : `"${target}/NCL.sh"`;
@@ -2036,28 +2186,38 @@ async function updaterApply() {
   else if (/\.tar\.gz$/.test(pending.file)) await extractTarGz(pending.file, stage);
   else return { ok: false, error: '不支持的安装包格式' };
 
-  // 定位解压出的启动器根（不同平台包结构不一样）
-  let target, kind;
+  // 定位解压出的启动器根（不同平台/不同版本的包结构不一样）
+  //   v1.8.0 的 Windows 包：顶层直接是 NCL.exe + engine/
+  //   v1.6.x 及更早：顶层是 NCL/ 目录，NCL.exe 在里面
+  let target, kind, stageSrc;
   if (process.platform === 'win32') {
-    const inner = path.join(stage, 'NCL');
     target = portableBaseDir();
     kind = 'bat';
-    if (!exists(path.join(inner, 'NCL.exe'))) return { ok: false, error: '安装包内未找到 NCL.exe' };
+    const flatExe = path.join(stage, 'NCL.exe');
+    const innerExe = path.join(stage, 'NCL', 'NCL.exe');
+    if (exists(flatExe)) {
+      stageSrc = stage;                       // 新结构：顶层就是启动器根
+    } else if (exists(innerExe)) {
+      stageSrc = path.join(stage, 'NCL');     // 旧结构：NCL/ 子目录
+    } else {
+      return { ok: false, error: '安装包内未找到 NCL.exe' };
+    }
   } else if (process.platform === 'linux') {
     target = portableBaseDir();
     kind = 'sh';
+    stageSrc = stage;
     if (!exists(path.join(stage, 'NCL.sh'))) return { ok: false, error: '安装包内未找到 NCL.sh' };
   } else {
     // macOS：解压出 NCL.app，替换 .app 所在目录
     const appPath = app.getPath('exe').replace(/\/Contents\/MacOS\/[^/]+$/, '');
     target = path.dirname(appPath);
     kind = 'sh-mac';
+    stageSrc = stage;
     if (!exists(path.join(stage, 'NCL.app'))) return { ok: false, error: '安装包内未找到 NCL.app' };
   }
   if (!target) return { ok: false, error: '无法定位启动器目录' };
 
   const scriptPath = path.join(path.join(paths().launcher, 'updates'), kind === 'bat' ? 'apply-update.bat' : 'apply-update.sh');
-  const stageSrc = process.platform === 'win32' ? path.join(stage, 'NCL') : stage;
   fs.writeFileSync(scriptPath, buildUpdaterScript(kind, stageSrc, target, process.pid));
   if (kind !== 'bat') fs.chmodSync(scriptPath, 0o755);
 
@@ -2731,6 +2891,37 @@ if (process.env.CUBE_TEST_MODE !== '1') {
   if (!app.requestSingleInstanceLock()) app.quit();
   app.on('second-instance', () => { if (win) win.focus(); });
 
+  /* 【v1.8.0 黑屏修复】GPU 进程崩溃保护
+   *
+   * 现象（v1.6.0 – v1.7.0）：双击 exe 后进程存活但窗口全黑。
+   * 实测日志：
+   *   ERROR:components/viz/service/main/viz_main_impl.cc:184] Exiting GPU process due to errors during initialization
+   *   ERROR:ui/gl/angle_platform_impl.cc:49] ANGLE Display::initialize error 0: Internal Vulkan error (-3)
+   *   FATAL:electron/shell/browser/electron_browser_main_parts.cc:501] Failed to shutdown.
+   *
+   * 两道防线：
+   *  1) 打包层：已恢复 vk_swiftshader / vulkan-1 / dxcompiler / dxil 等 GPU 回退文件
+   *  2) 运行层：GPU 进程真崩了也不让用户看黑屏 —— 记录崩溃次数，
+   *     连续 3 次后用软件渲染（disableHardwareAcceleration）重建窗口
+   */
+  let gpuCrashCount = 0;
+  let gpuFallbackApplied = false;
+  app.on('gpu-process-crashed', (_e, details) => {
+    gpuCrashCount += 1;
+    console.error(`[gpu] GPU 进程崩溃（第 ${gpuCrashCount} 次）：${details && details.reason}`);
+    if (!gpuFallbackApplied && gpuCrashCount >= 3) {
+      gpuFallbackApplied = true;
+      console.error('[gpu] 连续崩溃 3 次，切换到软件渲染模式重启窗口');
+      try {
+        // 注意：disableHardwareAcceleration 只在 app ready 前有效，
+        // 这里改用命令行开关 + 重启整个进程来真正生效。
+        app.relaunch({ args: process.argv.slice(1).concat(['--disable-gpu', '--disable-gpu-compositing']) });
+        app.exit(0);
+        return;
+      } catch { /* 忽略 */ }
+    }
+  });
+
   app.whenReady().then(() => {
     initPaths();
     for (const p of Object.values(paths())) ensureDir(p);
@@ -2810,6 +3001,7 @@ module.exports = {
   modrinthSearch, modrinthProject, vanillaList,
   wikiVersionInfo, wikiPatchNotes,
   updaterCheck,
+  mergeVersionJSON, detectLoader, isFabricProfile, mcOfLoaderVersion, ensureLauncherProfiles,
   installContent, installSingleFile, installModpack, contentGameDir, DL_CATEGORIES, BMCLAPI,
   aiAnalyzer, aiFixer, getAiConfig, saveAiConfig, runCrashAnalysis, rememberGameContext,
   setGameRoot: (r) => { GAME_ROOT = r; for (const p of Object.values(paths())) ensureDir(p); },

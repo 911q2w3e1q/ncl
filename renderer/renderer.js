@@ -837,9 +837,26 @@ async function loadVerList() {
   const loaderInstalledMC = (loader) => new Set(
     state.installed.filter((v) => (v.loader || (v.fabric ? 'fabric' : null)) === loader && v.mc).map((v) => v.mc)
   );
+  // 找出某个 MC 版本下已安装的加载器实例 id（用于「已装」行 → 选择该实例）
+  const loaderInstanceOf = (loader, mc) => {
+    const hit = state.installed.find((v) =>
+      (v.loader || (v.fabric ? 'fabric' : null)) === loader && v.mc === mc);
+    return hit ? hit.id : '';
+  };
   let list = [];
   if (verTab === 'installed') {
-    list = state.installed.map((v) => ({ id: v.id, type: v.loader || (v.fabric ? 'fabric' : 'installed'), time: v.time, installed: true }));
+    // 【bug 修复】这里必须区分「这是已安装的实例」和「这是待安装的 MC 版本」：
+    //  旧代码把已安装实例的 type 直接设成 loader 名（fabric/forge/…），
+    //  于是它落进 LOADER_TABS 分支 → 按钮显示「已装 Fabric」且被 disabled，
+    //  用户再也点不动这个已装好的版本（就是「装了启动器就用不了该版本」）。
+    //  现在：loader 实例用 type='installed' + 单独记 loaderKind，走「选择」分支。
+    list = state.installed.map((v) => ({
+      id: v.id,
+      type: 'installed',
+      loaderKind: v.loader || (v.fabric ? 'fabric' : ''),
+      time: v.time,
+      installed: true,
+    }));
   } else if (LOADER_TABS.includes(verTab)) {
     // 全量正式版列表（可搜索）；已装过该 loader 的版本直接标「已安装」，行上显示最新 loader 版本号
     const catalog = await getLoaderCatalog();
@@ -848,7 +865,13 @@ async function loadVerList() {
     list = manifestCache.versions
       .filter((v) => v.type === 'release')
       .slice(0, 400)
-      .map((v) => ({ ...v, type: verTab, installed: installedMC.has(v.id), loaderVer: catMap[v.id] || '' }));
+      .map((v) => ({
+        ...v,
+        type: verTab,
+        installed: installedMC.has(v.id),
+        loaderVer: catMap[v.id] || '',
+        loaderInstance: installedMC.has(v.id) ? loaderInstanceOf(verTab, v.id) : '',
+      }));
   } else if (verTab === 'old') {
     list = manifestCache.versions.filter((v) => v.type.startsWith('old_'));
   } else {
@@ -861,21 +884,56 @@ async function loadVerList() {
   for (const v of list) {
     const row = document.createElement('div');
     row.className = 'ver-row';
-    const typeLabel = { release: '正式版', snapshot: '快照', old_beta: 'Beta', old_alpha: 'Alpha', fabric: 'Fabric', forge: 'Forge', neoforge: 'NeoForge', quilt: 'Quilt', installed: '已安装' }[v.type] || v.type;
+    // 已安装的加载器实例：显示具体是哪个加载器
+    const shownType = v.loaderKind || v.type;
+    const typeLabel = v.loaderKind
+      ? LOADER_LABELS[v.loaderKind]
+      : ({ release: '正式版', snapshot: '快照', old_beta: 'Beta', old_alpha: 'Alpha', fabric: 'Fabric', forge: 'Forge', neoforge: 'NeoForge', quilt: 'Quilt', installed: '已安装' }[v.type] || v.type);
     const inst = installedIds.has(v.id);
     const sel = state.settings.selectedVersionId === v.id;
     row.innerHTML =
       `<span class="vname">${v.id}</span>` +
-      `<span class="vtype ${v.type}">${typeLabel}</span>` +
+      `<span class="vtype ${shownType}">${typeLabel}</span>` +
       `<span class="vmeta">${(v.releaseTime || v.time || '').slice(0, 10)}${v.loaderVer ? ` · ${LOADER_LABELS[v.type]} ${v.loaderVer}` : ''}${sel ? ' · <b style="color:#93c5fd">当前选择</b>' : ''}</span>` +
       `<span class="vstate">${inst ? '已装' : ''}</span>`;
     const btn = document.createElement('button');
     btn.className = 'btn';
     if (LOADER_TABS.includes(v.type)) {
+      // loader 页签：这里每一行是一个「MC 版本」，不是已安装的实例
       const label = LOADER_LABELS[v.type];
       if (v.installed) {
+        // 【bug 修复】旧代码这里 btn.disabled = true，用户点了没反应、也换不了别的 loader 版本。
+        //  现在给出两个入口：选择已装好的实例 / 再装一个新版本。
         btn.textContent = `已装 ${label}`;
-        btn.disabled = true;
+        btn.onclick = async () => {
+          const target = v.loaderInstance || v.id;
+          await api('versions:select', target);
+          closeModal('modal-version');
+          await refresh();
+          toast(`已切换到 ${target}`, true);
+        };
+        const more = document.createElement('button');
+        more.className = 'btn-ghost btn-sm';
+        more.style.marginLeft = '6px';
+        more.textContent = '装其它版本';
+        more.onclick = async () => {
+          const cat = await getLoaderCatalog();
+          const vers = await api('versions:loaderVersions', { loader: v.type, mc: v.id });
+          const list2 = (vers && vers.ok && vers.versions) || [];
+          if (!list2.length) { toast(`未获取到 ${label} 版本列表`, false); return; }
+          const want = window.prompt(`安装 ${v.id} 的哪个 ${label} 版本？\n（当前目录版本：${(cat[v.type] || {})[v.id] || '未知'}）`, list2[0]);
+          if (!want) return;
+          const r = await api('versions:installLoader', { loader: v.type, mc: v.id, version: want.trim() });
+          if (r && r.ok) {
+            toast(`${v.id} ${label} ${want.trim()} 安装完成`, true);
+            if (r.id) await api('versions:select', r.id);
+            await refresh(); loadVerList();
+          } else toast((r && r.error) || '安装失败', false);
+        };
+        row.appendChild(btn);
+        row.appendChild(more);
+        box.appendChild(row);
+        continue; // 这一行已经渲染完，跳过下面的通用按钮逻辑
       } else {
         const installText = v.loaderVer ? `安装 ${label} ${v.loaderVer}` : `安装 ${label}`;
         btn.textContent = installText;
@@ -886,7 +944,13 @@ async function loadVerList() {
             ? await api('versions:installFabric', v.id)
             : await api('versions:installLoader', { loader: v.type, mc: v.id });
           installing = null;
-          if (r.ok) { toast(`${v.id} ${label} 安装完成`, true); await refresh(); loadVerList(); }
+          if (r.ok) {
+            toast(`${v.id} ${label} 安装完成`, true);
+            // 【bug 修复】装完自动选中新实例，否则用户还得自己再找一遍才能启动
+            const newId = (r.result && r.result.id) || r.id || v.loaderInstance;
+            if (newId) await api('versions:select', newId);
+            await refresh(); loadVerList();
+          }
           else { toast(r.error); btn.disabled = false; btn.textContent = installText; }
         };
       }
