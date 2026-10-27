@@ -32,6 +32,8 @@ function arg(name, dflt) {
 const PLATFORM = arg('platform', process.platform);
 const ARCH = arg('arch', process.arch);
 const OUT_DIR = path.join(ROOT, arg('out', 'release'));
+/** v1.8.0：默认不打 asar（还原 v1.5.0 的 resources/app/ 目录形式），--asar 可开启 */
+const USE_ASAR = argv.includes('--asar');
 const APP_VERSION = require(path.join(ROOT, 'package.json')).version;
 const APP_NAME = 'Nexus Craft Launcher';
 const EXE_NAME = 'NCL';
@@ -121,8 +123,15 @@ function stageApp(stageDir) {
   return appDir;
 }
 
-/** 把 resources/app 目录打成 app.asar（减少文件数、略微提升启动速度） */
-function packAsar(stageDir) {
+/** 把 resources/app 目录打成 app.asar
+ *
+ * 【v1.8.0】默认不打包（保持 v1.5.0 的 resources/app/ 目录形式）。
+ * asar 是 v1.6.0 引入的新变量之一，与「顶层 exe + 激进裁剪」一起出现在黑屏版本里。
+ * 为了「还原 v1.5.0 的样子」并把变量降到最少，这里默认保留目录形式。
+ * 需要 asar 时用 --asar 打开。
+ */
+function packAsar(stageDir, enable) {
+  if (!enable) return null;
   const appDir = path.join(stageDir, 'resources', 'app');
   const asarOut = path.join(stageDir, 'resources', 'app.asar');
   if (!fs.existsSync(appDir)) return null;
@@ -140,30 +149,30 @@ function packAsar(stageDir) {
   }
 }
 
-/* ---------------- 瘦身清单 ---------------- */
-/**
- * 保留的 locales：启动器界面语言 + 英文兜底
- *其余 50+ 个 pak（每个 0.5~1.6MB）合计约 40MB，全部删掉
+/* ---------------- 运行时裁剪 ----------------
+ *
+ * 【重要教训】v1.6.0 – v1.7.0 因为激进裁剪导致 Windows 双击启动后「进程存活但窗口全黑」。
+ * 实测日志（Electron 37.10.3）：
+ *   ERROR:components/viz/service/main/viz_main_impl.cc:184] Exiting GPU process due to errors during initialization
+ *   ERROR:ui/gl/angle_platform_impl.cc:49] ANGLE Display::initialize error 0: Internal Vulkan error (-3)
+ *   FATAL:electron/shell/browser/electron_browser_main_parts.cc:501] Failed to shutdown.
+ *
+ * 根因：删掉了 GPU 进程初始化失败时的软件回退路径
+ *   - vk_swiftshader.dll / vk_swiftshader_icd.json  → SwiftShader 软件 Vulkan 渲染
+ *   - vulkan-1.dll                                  → Vulkan 加载器
+ *   - dxcompiler.dll / dxil.dll                     → D3D12 着色器编译
+ * 缺了它们，GPU 进程会反复崩溃退出，渲染进程拿不到合成器 → 窗口全黑但进程不死。
+ *
+ * 【决定】v1.8.0 起完全取消裁剪，运行时恢复到 v1.5.0 的完整形态。
+ * 宁可包大 90MB，也不能让用户的窗口打不开。
  */
-const KEEP_LOCALES = ['zh-CN.pak', 'en-US.pak'];
 
-/** 可安全删除的冗余文件（Electron 运行时用不到） */
-const JUNK_FILES = [
-  'LICENSES.chromium.html',   // 15MB 许可全文（保留 LICENSE 即可）
-  'ffmpeg.dll',                // 3MB 音视频编解码（启动器不播媒体；Windows 下非链接依赖，可删）
-  // 注意：Linux 下 libffmpeg.so 是 electron 二进制的动态链接依赖，删掉会导致启动失败
-  'vk_swiftshader.dll',        // 5MB 软件 Vulkan 渲染（GPU 不可用时才有意义）
-  'vk_swiftshader_icd.json',
-  'libvk_swiftshader.so',
-  'vulkan-1.dll',
-  'libvulkan.so.1',
-  'dxcompiler.dll',            // 25MB D3D12 编译（启动器无 3D 需求）
-  'dxil.dll',
-  // 注意：Linux 下 libGLESv2.so / libEGL.so 是 GPU 进程启动所需（缺了会反复报
-  // "Failed to load GLES library" 并导致退出阶段 Failed to shutdown），Linux 版必须保留
-  'vk_swiftshader_icd.json',
-  'swiftshader',
-];
+/** 仅保留这些（全部为 Electron 自带、与渲染无关的纯文档/许可文件） */
+const JUNK_FILES = [];
+
+/** locales 全量保留：Electron 在切换系统语言时会按需加载对应 pak，
+ *  缺文件会导致 UI 文字变成方块/空白。1.5.0 就是全量的。 */
+const KEEP_LOCALES = null; // null = 不裁剪
 
 /** 按平台区分的可删文件（Linux 的动态链接依赖不能删） */
 function junkForPlatform() {
@@ -176,14 +185,16 @@ function junkForPlatform() {
 
 function slimRuntime(runtimeDir) {
   const removed = [];
-  // 1) locales 裁剪
-  const locales = path.join(runtimeDir, 'locales');
-  if (fs.existsSync(locales)) {
-    for (const f of fs.readdirSync(locales)) {
-      if (KEEP_LOCALES.includes(f)) continue;
-      const p = path.join(locales, f);
-      const size = fs.existsSync(p) ? fs.statSync(p).size : 0;
-      try { fs.unlinkSync(p); removed.push([`locales/${f}`, size]); } catch { /* 忽略 */ }
+  // 1) locales 裁剪（KEEP_LOCALES 为 null 时不裁剪）
+  if (KEEP_LOCALES) {
+    const locales = path.join(runtimeDir, 'locales');
+    if (fs.existsSync(locales)) {
+      for (const f of fs.readdirSync(locales)) {
+        if (KEEP_LOCALES.includes(f)) continue;
+        const p = path.join(locales, f);
+        const size = fs.existsSync(p) ? fs.statSync(p).size : 0;
+        try { fs.unlinkSync(p); removed.push([`locales/${f}`, size]); } catch { /* 忽略 */ }
+      }
     }
   }
   // 2) 冗余文件删除
@@ -225,6 +236,54 @@ function ensureAiRuntime() {
   return target;
 }
 
+/* ---------------- 顶层启动壳（Windows） ---------------- */
+/**
+ * 用 MinGW 编译 tools/launcher.c → 顶层 NCL.exe（52KB 壳）
+ * 壳的职责：找到同目录的 engine\electron.exe 并以 engine 为工作目录拉起它。
+ * 找不到时弹窗提示，避免「双击没反应」的白痴体验。
+ * 没有 MinGW 工具链时返回 null，调用方会退化为「顶层直接是 Electron 本体」。
+ */
+function buildLauncherShell() {
+  const src = path.join(ROOT, 'tools', 'launcher.c');
+  if (!fs.existsSync(src)) return null;
+  const gcc = 'x86_64-w64-mingw32-gcc';
+  const windres = 'x86_64-w64-mingw32-windres';
+  try {
+    execFileSync('which', [gcc], { stdio: 'pipe' });
+  } catch {
+    console.warn('      未找到 MinGW 工具链，跳过启动壳编译');
+    return null;
+  }
+  const ico = path.join(ROOT, 'dotnet', 'NCL.NET', 'Resources', 'icon.ico');
+  const tmp = path.join(os.tmpdir(), `ncl-launcher-${process.pid}`);
+  ensureDir(tmp);
+  const out = path.join(tmp, 'NCL.exe');
+  try {
+    const obj = path.join(tmp, 'resource.o');
+    if (fs.existsSync(ico) && hasTool(windres)) {
+      const rc = path.join(tmp, 'resource.rc');
+      fs.writeFileSync(rc, `1 ICON "${ico.replace(/\\/g, '\\\\')}"\n`, 'utf8');
+      try {
+        execFileSync(windres, [rc, '-o', obj], { stdio: 'pipe' });
+      } catch { /* 图标失败不致命 */ }
+    }
+    const args = ['-mwindows', '-municode', '-O2', '-s', src];
+    if (fs.existsSync(obj)) args.push(obj);
+    args.push('-o', out);
+    execFileSync(gcc, args, { stdio: 'pipe' });
+    if (!fs.existsSync(out)) return null;
+    return out;   // 注意：临时目录不能在复制前删
+  } catch (e) {
+    console.warn('      启动壳编译失败：' + (e.message || e));
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* 忽略 */ }
+    return null;
+  }
+}
+
+function hasTool(cmd) {
+  try { execFileSync('which', [cmd], { stdio: 'pipe' }); return true; } catch { return false; }
+}
+
 /* ---------------- 主流程 ---------------- */
 function main() {
   const dist = electronDist();
@@ -239,8 +298,8 @@ function main() {
   const appDir = stageApp(stageDir);
 
   console.log(`[3/6] asar 打包…`);
-  const asar = packAsar(stageDir);
-  console.log(asar ? '      app.asar 打包完成' : '      跳过 asar（使用目录形式）');
+  const asar = packAsar(stageDir, USE_ASAR);
+  console.log(asar ? '      app.asar 打包完成' : '      跳过 asar（使用目录形式，与 v1.5.0 一致）');
 
   // AI 运行时必须放在 app.asar 之外（wasm 需要真实文件路径、ESM 需要可读源）
   ensureAiRuntime();
@@ -256,15 +315,41 @@ function main() {
   for (const [, size] of removed) saved += size;
   console.log(`      删除 ${removed.length} 项，节省 ${(saved / 1048576).toFixed(1)} MB`);
 
-  console.log(`[5/6] 顶层 exe 归位…`);
-  // Electron 打包惯例：主程序名即 exe 名。electron-builder 会把 electron.exe 重命名为产品名，
-  // 这里手动完成：把 runtime 里的 electron.exe 改名为 NCL.exe，移到顶层。
+  console.log(`[5/6] 组装产物结构…`);
+  // v1.8.0：还原 v1.5.0 的发布形态
+  //   顶层：NCL.exe（52KB MinGW 壳，双击它）
+  //   engine/：完整 Electron 运行时 + 应用代码
+  // 之所以回退到 engine/ 结构：v1.5.0 这样发布是用户验证过能正常打开的形态，
+  // 而 v1.6.0+ 改成「顶层直接放 electron.exe」后出现了「进程存活但窗口全黑」。
+  // 完整运行时（含 GPU 回退文件）已在上一步恢复，两者叠加才能真正回到可用状态。
   if (IS_WIN) {
-    const src = path.join(stageDir, 'electron.exe');
-    const dst = path.join(stageDir, 'NCL.exe');
-    if (fs.existsSync(src)) {
-      fs.renameSync(src, dst);
-      console.log('      electron.exe → NCL.exe（顶层可直接双击）');
+    // engine/electron.exe 保持原名，顶层壳 launcher.c 按 engine\electron.exe 查找
+    const engineDir = path.join(stageDir, 'engine');
+    fs.mkdirSync(engineDir, { recursive: true });
+    for (const name of fs.readdirSync(stageDir)) {
+      if (name === 'engine') continue;
+      fs.renameSync(path.join(stageDir, name), path.join(engineDir, name));
+    }
+    // engine/electron.exe → engine/NCL.exe（与 v1.5.0 一致，任务栏/进程名显示 NCL）
+    const eleExe = path.join(engineDir, 'electron.exe');
+    if (fs.existsSync(eleExe)) {
+      fs.renameSync(eleExe, path.join(engineDir, 'NCL.exe'));
+    }
+    const launcher = buildLauncherShell();
+    if (launcher) {
+      fs.copyFileSync(launcher, path.join(stageDir, 'NCL.exe'));
+      try { fs.rmSync(path.dirname(launcher), { recursive: true, force: true }); } catch { /* 忽略 */ }
+      console.log('      顶层 NCL.exe（启动壳）已生成');
+      console.log('      engine/ ← 完整 Electron 运行时');
+    } else {
+      // 没有 MinGW 工具链时退化为「顶层直接是 Electron」——结构不同但功能等价
+      const src = path.join(engineDir, 'NCL.exe');
+      const dst = path.join(stageDir, 'NCL.exe');
+      if (fs.existsSync(src)) {
+        fs.renameSync(src, dst);
+        fs.rmSync(engineDir, { recursive: true, force: true });
+        console.log('      未能编译启动壳，退化为顶层 NCL.exe（Electron 本体）');
+      }
     }
   } else if (!IS_MAC) {
     // Linux：electron → NCL
@@ -307,8 +392,11 @@ function main() {
     }
   } else {
     // 排除 Electron 自带的默认 app（electron 默认 app.asar 无需保留）
-    const dflt = path.join(stageDir, 'resources', 'default_app.asar');
-    if (fs.existsSync(dflt)) fs.unlinkSync(dflt);
+    // Windows 下资源已移入 engine/，两处都清一遍
+    for (const base of [path.join(stageDir, 'resources'), path.join(stageDir, 'engine', 'resources')]) {
+      const dflt = path.join(base, 'default_app.asar');
+      if (fs.existsSync(dflt)) fs.unlinkSync(dflt);
+    }
     fs.cpSync(stageDir, outPath, { recursive: true });
   }
 

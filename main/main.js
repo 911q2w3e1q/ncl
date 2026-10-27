@@ -24,7 +24,7 @@ const wikiProbe = require('./wiki-probe');
 const onlineTunnel = require('./online-tunnel');
 
 const LAUNCHER_NAME = 'NCL';
-const LAUNCHER_VERSION = '1.7.0';
+const LAUNCHER_VERSION = '1.8.0';
 const MANIFEST_URL = 'https://piston-meta.mojang.com/mc/game/version_manifest_v2.json';
 const JAVA_MANIFEST_URL = 'https://launchermeta.mojang.com/v1/products/java-runtime/2ec0cc96c44e5a76b9c8b7c39df7210883d12871/all.json';
 const GITHUB_REPO = '911q2w3e1q/ncl';
@@ -38,6 +38,15 @@ if (protocol && typeof protocol.registerSchemesAsPrivileged === 'function') {
   protocol.registerSchemesAsPrivileged([
     { scheme: 'ncl-ai', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } },
   ]);
+}
+
+/* 【v1.8.0 黑屏修复】软件渲染兜底
+ * GPU 进程连续崩溃时 main.js 会用 --disable-gpu 重启进程，
+ * 这里在 app ready 之前把硬件加速关掉，保证软件渲染真正生效（窗口不再全黑）。 */
+if (process.argv.includes('--disable-gpu')) {
+  try {
+    app.disableHardwareAcceleration();
+  } catch { /* Node 测试环境忽略 */ }
 }
 
 /* ---------------- 路径 ----------------
@@ -2730,6 +2739,37 @@ function ACCCOUNT_TYPES_YGGDRASIL() { return ACCOUNT_TYPES.YGGDRASIL; }
 if (process.env.CUBE_TEST_MODE !== '1') {
   if (!app.requestSingleInstanceLock()) app.quit();
   app.on('second-instance', () => { if (win) win.focus(); });
+
+  /* 【v1.8.0 黑屏修复】GPU 进程崩溃保护
+   *
+   * 现象（v1.6.0 – v1.7.0）：双击 exe 后进程存活但窗口全黑。
+   * 实测日志：
+   *   ERROR:components/viz/service/main/viz_main_impl.cc:184] Exiting GPU process due to errors during initialization
+   *   ERROR:ui/gl/angle_platform_impl.cc:49] ANGLE Display::initialize error 0: Internal Vulkan error (-3)
+   *   FATAL:electron/shell/browser/electron_browser_main_parts.cc:501] Failed to shutdown.
+   *
+   * 两道防线：
+   *  1) 打包层：已恢复 vk_swiftshader / vulkan-1 / dxcompiler / dxil 等 GPU 回退文件
+   *  2) 运行层：GPU 进程真崩了也不让用户看黑屏 —— 记录崩溃次数，
+   *     连续 3 次后用软件渲染（disableHardwareAcceleration）重建窗口
+   */
+  let gpuCrashCount = 0;
+  let gpuFallbackApplied = false;
+  app.on('gpu-process-crashed', (_e, details) => {
+    gpuCrashCount += 1;
+    console.error(`[gpu] GPU 进程崩溃（第 ${gpuCrashCount} 次）：${details && details.reason}`);
+    if (!gpuFallbackApplied && gpuCrashCount >= 3) {
+      gpuFallbackApplied = true;
+      console.error('[gpu] 连续崩溃 3 次，切换到软件渲染模式重启窗口');
+      try {
+        // 注意：disableHardwareAcceleration 只在 app ready 前有效，
+        // 这里改用命令行开关 + 重启整个进程来真正生效。
+        app.relaunch({ args: process.argv.slice(1).concat(['--disable-gpu', '--disable-gpu-compositing']) });
+        app.exit(0);
+        return;
+      } catch { /* 忽略 */ }
+    }
+  });
 
   app.whenReady().then(() => {
     initPaths();

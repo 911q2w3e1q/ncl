@@ -77,29 +77,30 @@
   - **两个穿透提供方**：serveo（免注册、用系统自带 ssh、零下载，默认）/ ngrok（需免费 authtoken，带宽不限、更稳定）
   - Minecraft 用的是原始 TCP 协议，Cloudflare 快速隧道等 HTTP 型隧道**连不上**——因此内置的是支持裸 TCP 直通的方案
 
-## 下载（v1.7.0）
+## 下载（v1.8.0）
 
 [GitHub Releases](https://github.com/911q2w3e1q/ncl/releases) 提供开箱即用的打包版本，无需 Node 环境：
 
 | 平台 | 包 | 用法 |
 | --- | --- | --- |
-| **Windows 10/11（Electron 版，最新版）** | **`NCL-1.7.0-win64.zip`** | **解压后双击顶层 `NCL.exe` 即可（无 `engine/` 目录，运行时已瘦身至 ~105 MB）** |
-| Windows 10/11（Electron 版，上一版） | `NCL-1.6.2-win64.zip` | 解压后双击顶层 `NCL.exe`（含中文 Wiki 内嵌，无联机功能） |
+| **Windows 10/11（Electron 版，最新版）** | **`NCL-1.8.0-win64.zip`** | **解压后双击顶层 `NCL.exe`（与 `engine` 文件夹保持在一起）** |
 | Windows 7 SP1 / 8 / 10 / 11（.NET 版） | `NCL-1.5.0-win64-dotnet.zip` | 解压后双击 `NCL.exe`，仅 3 个文件，内存占用约为 Electron 版的 1/5 |
-| Windows 10/11（Electron 版，旧版） | `NCL-1.6.0-win64.zip` | 解压后双击 `NCL.exe`（与 `engine` 文件夹保持在一起） |
 | Linux x64 | `NCL-1.5.0-linux-x64.tar.gz` | 解压后执行 `./NCL.sh` |
 | macOS Apple Silicon | `NCL-1.5.0-macos-arm64.zip` | 解压后右键 → 打开 `NCL.app`（未签名，首次需右键绕过 Gatekeeper） |
 | macOS Intel | `NCL-1.5.0-macos-x64.zip` | 同上 |
 
-**v1.7.0 的变化**：新增**「联机」页**——选版本 → 游戏里开「对局域网开放」→ NCL 自动扫端口 → 点「开始穿透」拿到**免费公网地址**，朋友在 NCL 里粘地址就能自动进服。支持 serveo（免注册零配置）与 ngrok（需 authtoken、更稳定）两个穿透提供方。1.6.2 的中文 Wiki 内嵌、1.6.1 的 Fabric API 一键安装、1.6.0 的免 API Key 本地小模型 AI 与顶层 exe 瘦身同样保留。
+**v1.8.0 的变化：修复「双击黑屏」**。v1.6.0 – v1.7.0 双击运行后进程存活但窗口全黑，根因是打包时的「激进瘦身」把 GPU 回退文件（`vk_swiftshader.dll` / `vulkan-1.dll` / `dxcompiler.dll` / `dxil.dll`）删干净了，在显卡驱动不支持 D3D12/Vulkan 的 Windows 机器上 GPU 进程必然初始化失败且无软件回退。本版**完全取消裁剪**、运行时恢复到 v1.5.0 的完整形态（locales 55 个语言包全留），打包结构也回退成「顶层 89KB 启动壳 + `engine/` 完整运行时」，另加一道保险：GPU 进程连续崩溃 3 次会自动用软件渲染重启。体积因此从 ~105 MB 涨回 ~131 MB —— 这 26 MB 正是让窗口不再全黑的文件。
 
-**v1.6.2 的变化**：Wiki 资料页**内嵌真实浏览器直出中文 Minecraft Wiki**（`Java版<版本号>` 词条，原生中文、不再自己抓取翻译；中文站无词条时自动回退英文站）。1.6.1 的 Fabric API 一键安装与 1.6.0 的免 API Key 本地小模型 AI、顶层 exe 瘦身同样保留。
+**v1.7.0 的变化**：新增**「联机」页**——选版本 → 游戏里开「对局域网开放」→ NCL 自动扫端口 → 点「开始穿透」拿到**免费公网地址**，朋友在 NCL 里粘地址就能自动进服。支持 serveo（免注册零配置）与 ngrok（需 authtoken、更稳定）两个穿透提供方。
 
-**v1.6.1 的变化**：装 Fabric 加载器时**顺手把 Fabric API 一起装上**（弹窗底部默认勾选，版本号实时从 Modrinth 拉）——不用再自己切到 Mod 页搜「Fabric API」手动装了。1.6.0 的免 API Key 本地小模型 AI 与顶层 exe 瘦身同样保留。
+**v1.6.2 的变化**：Wiki 资料页**内嵌真实浏览器直出中文 Minecraft Wiki**（`Java版<版本号>` 词条，原生中文、不再自己抓取翻译；中文站无词条时自动回退英文站）。
 
-**v1.6.0 的变化**：网页内核 Windows 版把主程序从 `engine/` 挪回顶层（`NCL.exe` 直接双击），并裁掉了 55 个语言包、Chromium 许可全文、D3D12 编译器、软件 Vulkan 等启动器用不到的部分，zip 从 ~135 MB 降到 ~105 MB。同时新增了**免 API Key 的内置本地小模型 AI**。
+**v1.6.1 的变化**：装 Fabric 加载器时**顺手把 Fabric API 一起装上**（弹窗底部默认勾选，版本号实时从 Modrinth 拉）——不用再自己切到 Mod 页搜「Fabric API」手动装了。
 
-两个 Windows 包**并存使用、互不覆盖**：想要最新功能（含联机、中文 Wiki、本地 AI、Fabric API 一键安装）与完整界面特效选 `1.7.0` 的 Electron 版，想要低内存与 Win7 兼容选 `.NET` 版。1.0.0 – 1.6.2 Release 仍保留，不影响老用户。
+**v1.6.0 的变化**：网页内核 Windows 版新增**免 API Key 的内置本地小模型 AI**（SmolLM2-135M / Qwen2.5-0.5B，设置页一键下载，之后完全离线分析）。
+
+> ⚠️ **v1.6.0 – v1.7.0 存在「双击黑屏」回归，已在 v1.8.0 修复，请直接用 v1.8.0。**
+> 详细的根因分析与逐文件对照见 [`RELEASE_NOTES_v1.8.0.md`](RELEASE_NOTES_v1.8.0.md)。
 
 **更新方式**：设置 → 启动器 → 检查更新 → 下载并安装，启动器会自动重启完成替换（也可直接下载新版包手动覆盖）。
 
