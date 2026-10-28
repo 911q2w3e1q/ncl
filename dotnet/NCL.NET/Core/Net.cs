@@ -39,7 +39,7 @@ namespace Ncl.Core
                     {
                         Timeout = TimeSpan.FromSeconds(120)
                     };
-                    _client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "NCL-Launcher/1.5.0");
+                    _client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "NCL-Launcher/1.10.4");
                 }
                 return _client;
             }

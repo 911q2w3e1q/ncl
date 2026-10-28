@@ -18,6 +18,8 @@
     <Reference Include="System.Management" />
     <Reference Include="System.IO.Compression" />
     <Reference Include="System.IO.Compression.FileSystem" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Drawing" />
   </ItemGroup>
 
   <ItemGroup>
@@ -28,5 +30,4 @@
   <ItemGroup>
     <ProjectReference Include="..\NCL.NET\NCL.NET.csproj" />
   </ItemGroup>
-
 </Project>

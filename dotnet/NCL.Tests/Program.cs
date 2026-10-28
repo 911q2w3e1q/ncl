@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text;
 using Newtonsoft.Json.Linq;
 using Ncl.Core;
+using Ncl.Forms;
 
 namespace Ncl.Tests
 {
@@ -17,6 +18,10 @@ namespace Ncl.Tests
 
         public static int Main(string[] args)
         {
+            // GUI 冒烟测试走独立入口（需要 xvfb / 桌面环境）
+            if (args != null && args.Length > 0 && args[0] == "--gui")
+                return GuiSmoke.Run();
+
             Console.WriteLine("=== NCL .NET 版单元测试 ===\n");
 
             // 测试用独立目录，避免污染真实环境
@@ -49,6 +54,11 @@ namespace Ncl.Tests
             TestEcdsa();
             TestVersionSort();
             TestAccountsOffline();
+            TestOnlineAddress();
+            TestOnlineHandshake();
+            TestOnlineTunnelOutput();
+            TestMsPasswordUrl();
+            TestMergeVersionJson();
 
             try { Directory.Delete(testRoot, true); } catch { }
 
@@ -70,6 +80,18 @@ namespace Ncl.Tests
         {
             if (cond) { _pass++; Console.WriteLine("  ✔ " + name); }
             else { _fail++; _failures.Add(name); Console.WriteLine("  ✖ " + name); }
+        }
+
+        /// <summary>带诊断信息的断言：失败时把实际值打出来，便于定位</summary>
+        private static void Check(string name, bool cond, object detail)
+        {
+            if (cond) { _pass++; Console.WriteLine("  ✔ " + name); }
+            else
+            {
+                _fail++;
+                _failures.Add(name);
+                Console.WriteLine("  ✖ " + name + " → " + (detail ?? "(null)"));
+            }
         }
 
         private static void Eq<T>(string name, T actual, T expected)
@@ -147,6 +169,23 @@ namespace Ncl.Tests
             var all = new List<string> { "20.4.100", "20.4.90", "21.0.1", "20.2.9" };
             var filtered = Loaders.NeoForgeForMC("1.20.4", all);
             Check("按前缀过滤掉其他分支", filtered.Count == 2 && !filtered.Contains("21.0.1"));
+            // Minecraft 26.x 年份编号体系
+            Eq("26.3 → 26.3.0", Loaders.NeoForgePrefix("26.3") ?? "", "26.3.0");
+            Eq("26.2 → 26.2.0", Loaders.NeoForgePrefix("26.2") ?? "", "26.2.0");
+            Eq("26.1 → 26.1.0", Loaders.NeoForgePrefix("26.1") ?? "", "26.1.0");
+            Eq("26.1.2 → 26.1.2", Loaders.NeoForgePrefix("26.1.2") ?? "", "26.1.2");
+            Check("26.x 不会算出 null", Loaders.NeoForgePrefix("26.3") != null);
+            // 26.3 只应匹配 26.3.0.x，不混入 26.2 / 26.1 / 26.4
+            var all26 = new List<string>
+            {
+                "26.3.0.99", "26.3.0.100", "26.2.0.93", "26.1.2.124", "26.1.0.117", "26.4.0.1"
+            };
+            var f26 = Loaders.NeoForgeForMC("26.3", all26);
+            Check("26.3 只匹配 26.3.0.x", f26.Count == 2 && f26.All(x => x.StartsWith("26.3.0.")),
+                string.Join(",", f26));
+            var f2612 = Loaders.NeoForgeForMC("26.1.2", all26);
+            Check("26.1.2 只匹配自己系列", f2612.Count == 1 && f2612[0] == "26.1.2.124",
+                string.Join(",", f2612));
         }
 
         private static void TestSortVersionsDesc()
@@ -468,6 +507,13 @@ namespace Ncl.Tests
             Eq("1.17 → 16", Java.InstallerJavaMajor("1.17"), 16);
             Eq("1.16.5 → 8", Java.InstallerJavaMajor("1.16.5"), 8);
             Eq("未知 → 17", Java.InstallerJavaMajor("abc"), 17);
+            // Minecraft 26.x 年份编号体系：全系要求 Java 25
+            Eq("26.1 → 25", Java.InstallerJavaMajor("26.1"), 25);
+            Eq("26.1.1 → 25", Java.InstallerJavaMajor("26.1.1"), 25);
+            Eq("26.1.2 → 25", Java.InstallerJavaMajor("26.1.2"), 25);
+            Eq("26.2 → 25", Java.InstallerJavaMajor("26.2"), 25);
+            Eq("26.3 → 25", Java.InstallerJavaMajor("26.3"), 25);
+            Eq("26.4-snapshot-6 → 25", Java.InstallerJavaMajor("26.4-snapshot-6"), 25);
         }
 
         private static void TestEcdsa()
@@ -510,6 +556,187 @@ namespace Ncl.Tests
             Throws<Exception>("过短玩家名被拒", () => Accounts.OfflineLogin("ab"));
             Throws<Exception>("非法字符被拒", () => Accounts.OfflineLogin("中文名"));
             Throws<Exception>("过长玩家名被拒", () => Accounts.OfflineLogin("abcdefghijklmnopq"));
+        }
+
+        /* ---------------- 联机 ---------------- */
+
+        private static void TestOnlineAddress()
+        {
+            Console.WriteLine("[联机地址解析]");
+            var a1 = Online.ParseServerAddress("example.com:23308");
+            Eq("host:port 主机", a1?.Host ?? "", "example.com");
+            Eq("host:port 端口", a1?.Port ?? 0, 23308);
+
+            var a2 = Online.ParseServerAddress("example.com");
+            Eq("纯 host 主机", a2?.Host ?? "", "example.com");
+            Eq("纯 host 默认端口", a2?.Port ?? 0, 25565);
+
+            var a3 = Online.ParseServerAddress("https://example.com:1234/path");
+            Eq("带协议 URL 主机", a3?.Host ?? "", "example.com");
+            Eq("带协议 URL 端口", a3?.Port ?? 0, 1234);
+
+            var a4 = Online.ParseServerAddress("[::1]:25565");
+            Eq("IPv6 主机", a4?.Host ?? "", "::1");
+            Eq("IPv6 端口", a4?.Port ?? 0, 25565);
+
+            Check("空输入返回 null", Online.ParseServerAddress("") == null);
+            Check("纯空串返回 null", Online.ParseServerAddress("   ") == null);
+            Check("非法端口返回 null", Online.ParseServerAddress("host:99999") == null);
+            Check("无 host 返回 null", Online.ParseServerAddress(":1234") == null);
+        }
+
+        private static void TestOnlineHandshake()
+        {
+            Console.WriteLine("[MC 握手包]");
+            // VarInt 编码
+            Eq("VarInt 0", string.Join(",", Online.VarInt(0)), "0");
+            Eq("VarInt 1", string.Join(",", Online.VarInt(1)), "1");
+            Eq("VarInt 127", string.Join(",", Online.VarInt(127)), "127");
+            Eq("VarInt 128（两字节）", string.Join(",", Online.VarInt(128)), "128,1");
+            Eq("VarInt 255（两字节）", string.Join(",", Online.VarInt(255)), "255,1");
+
+            // 握手包结构：长度前缀 + packet id(0x00) + 协议版本 + host + port + Next State(0x01)
+            var hs = Online.BuildHandshake("127.0.0.1", 25565);
+            Check("握手包长度合理", hs.Length > 10);
+            int pid;
+            int idx = Online.ReadVarInt(hs, 0, out pid);
+            // 长度前缀的值 = 后续 body 的字节数（不含前缀本身）
+            Eq("长度前缀解析正确", pid, hs.Length - idx);
+            Eq("packet id = 0x00（Handshake）", hs[idx], 0x00);
+            int proto;
+            int idx2 = Online.ReadVarInt(hs, idx + 1, out proto);
+            Eq("协议版本号", proto, 47);
+            // 字符串长度前缀
+            int hostLen;
+            int idx3 = Online.ReadVarInt(hs, idx2, out hostLen);
+            Eq("host 长度前缀", hostLen, 9);
+            Eq("host 内容", Encoding.UTF8.GetString(hs, idx3, hostLen), "127.0.0.1");
+            // 端口大端
+            int port = (hs[idx3 + hostLen] << 8) | hs[idx3 + hostLen + 1];
+            Eq("端口大端序", port, 25565);
+            // Next State = 1（Status）
+            int nextState;
+            Online.ReadVarInt(hs, idx3 + hostLen + 2, out nextState);
+            Eq("Next State = 1（Status）", nextState, 1);
+        }
+
+        private static void TestOnlineTunnelOutput()
+        {
+            Console.WriteLine("[隧道输出解析]");
+            var s1 = Online.ParseServeoAddress("Forwarding TCP connections from serveousercontent.com:23308");
+            Eq("serveo 主机", s1?.Host ?? "", "serveousercontent.com");
+            Eq("serveo 端口", s1?.Port ?? 0, 23308);
+
+            var s2 = Online.ParseServeoAddress("[ssh] Allocated port 57682 for remote forward to 127.0.0.1:46133");
+            Eq("serveo Allocated 主机", s2?.Host ?? "", "serveousercontent.com");
+            Eq("serveo Allocated 端口", s2?.Port ?? 0, 57682);
+
+            Check("无关文本返回 null", Online.ParseServeoAddress("hello world") == null);
+
+            var n1 = Online.ParseNgrokAddress("Forwarding tcp://0.tcp.ngrok.io:12345 -> localhost:25565");
+            Eq("ngrok 主机", n1?.Host ?? "", "0.tcp.ngrok.io");
+            Eq("ngrok 端口", n1?.Port ?? 0, 12345);
+
+            var l1 = Online.ParseLocalhostRunAddress("https://abc123.lhr.life tunneled with tls termination");
+            Eq("localhost.run 主机", l1?.Host ?? "", "abc123.lhr.life");
+            Eq("localhost.run 端口", l1?.Port ?? 0, 443);
+        }
+
+        /* ---------------- 微软账号密码登录 ---------------- */
+
+        private static void TestMsPasswordUrl()
+        {
+            Console.WriteLine("[微软密码登录 URL]");
+            var url = MsPasswordLogin.BuildAuthorizeUrl("me@example.com", "st123");
+            Check("含 client_id", url.Contains("client_id=" + MsPasswordLogin.ClientId));
+            Check("含 response_type=token", url.Contains("response_type=token"));
+            Check("含 redirect_uri", url.Contains("redirect_uri="));
+            Check("含 login_hint 自动填账号", url.Contains("login_hint=me%40example.com"));
+            Check("无账号时不带 login_hint",
+                !MsPasswordLogin.BuildAuthorizeUrl("", "s").Contains("login_hint"));
+
+            // fragment 解析
+            var tok = MsPasswordLogin.ParseFragmentToken(
+                "https://login.live.com/oauth20_desktop.srf#access_token=AAA&refresh_token=RRR&expires_in=86400");
+            Check("解析到 access_token", tok != null && tok["access_token"] == "AAA");
+            Eq("解析到 refresh_token", tok?["refresh_token"] ?? "", "RRR");
+            Eq("解析到 expires_in", tok?["expires_in"] ?? "", "86400");
+
+            Check("无 token 的 URL 返回 null",
+                MsPasswordLogin.ParseFragmentToken("https://example.com/#foo=bar") == null);
+
+            // 错误解析
+            var err = MsPasswordLogin.ParseAuthError(
+                "https://login.live.com/oauth20_desktop.srf#error=access_denied&error_description=user+declined");
+            Check("解析到授权错误", err != null && err.Contains("declined"), err);
+
+            // 错误分类
+            Eq("两步验证", MsPasswordLogin.ClassifyError("MFA"),
+                "该微软账号启用了两步验证，请改用「设备码授权」登录");
+            Eq("账号不存在", MsPasswordLogin.ClassifyError("NO_ACCOUNT"),
+                "该邮箱不是有效的微软账号，请确认邮箱是否正确");
+            Eq("密码错误", MsPasswordLogin.ClassifyError("BAD_PASSWORD"),
+                "密码错误，请重新输入");
+            Eq("取消授权", MsPasswordLogin.ClassifyError("access_denied"),
+                "你取消了授权，未完成登录");
+        }
+
+        /* ---------------- 版本 JSON 合并 ---------------- */
+
+        private static void TestMergeVersionJson()
+        {
+            Console.WriteLine("[版本 JSON 合并]");
+            var parent = new JObject
+            {
+                ["id"] = "1.20.1",
+                ["libraries"] = new JArray(new JObject { ["name"] = "com.mojang:foo:1.0" }),
+                ["arguments"] = new JObject
+                {
+                    ["jvm"] = new JArray("-Xmx1G"),
+                    ["game"] = new JArray("--demo")
+                },
+                ["javaVersion"] = new JObject { ["majorVersion"] = 17 }
+            };
+            var forgeChild = new JObject
+            {
+                ["id"] = "1.20.1-forge-47.1.3",
+                ["inheritsFrom"] = "1.20.1",
+                ["libraries"] = new JArray(new JObject { ["name"] = "net.minecraftforge:forge:47.1.3" }),
+                ["arguments"] = new JObject
+                {
+                    ["jvm"] = new JArray("-Xmx2G"),
+                    ["game"] = new JArray("--forge")
+                }
+            };
+            var merged = Versions.MergeVersionJson(parent, forgeChild);
+            Eq("保留 inheritsFrom", (string)merged["inheritsFrom"] ?? "", "1.20.1");
+            Check("Forge 不被误标为 Fabric", (bool?)merged["_fabric"] != true);
+            Eq("加载器识别为 forge", Rules.DetectLoader(merged) ?? "", "forge");
+            Eq("库数量 = 父 + 子", ((JArray)merged["libraries"]).Count, 2);
+
+            // 幂等：二次合并不应让 arguments 无限累加
+            var merged2 = Versions.MergeVersionJson(merged, forgeChild);
+            Eq("二次合并 jvm 数量不变", ((JArray)merged2["arguments"]?["jvm"]).Count,
+                ((JArray)merged["arguments"]?["jvm"]).Count);
+            Eq("二次合并库数量不变", ((JArray)merged2["libraries"]).Count,
+                ((JArray)merged["libraries"]).Count);
+
+            // Fabric profile 仍应打上 _fabric 标
+            var fabricParent = new JObject
+            {
+                ["id"] = "26.3",
+                ["libraries"] = new JArray(),
+                ["mainClass"] = "net.fabricmc.loader.impl.launch.knot.KnotClient"
+            };
+            var fabricChild = new JObject
+            {
+                ["id"] = "fabric-loader-0.20.1-26.3",
+                ["inheritsFrom"] = "26.3",
+                ["libraries"] = new JArray(new JObject { ["name"] = "net.fabricmc:fabric-loader:0.20.1" })
+            };
+            var fm = Versions.MergeVersionJson(fabricParent, fabricChild);
+            Check("Fabric 仍被打标", (bool?)fm["_fabric"] == true);
+            Eq("Fabric 识别为 fabric", Rules.DetectLoader(fm) ?? "", "fabric");
         }
     }
 }
