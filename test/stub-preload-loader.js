@@ -12,7 +12,7 @@ const INSTALLED = [
 const state = {
   gameRoot: '/tmp/ncl-test',
   launcherDir: '/tmp/ncl-test/launcher',
-  launcherVersion: '1.9.0',
+  launcherVersion: '1.10.3',
   sysMemoryMB: 8192,
   accounts: [],
   selectedAccount: null,

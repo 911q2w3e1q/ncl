@@ -112,6 +112,12 @@ const mockApi = (channel, ...args) => new Promise((resolve) => {
         }, 1800);
         break;
       }
+      case 'account:loginMicrosoftPassword': {
+        const acc = { id: 'mock-pwd', type: 'microsoft', name: 'PwdPlayer', uuid: '069a79f4-44e9-4726-a5be-fca90e38aaf7', xuid: '9876543210', skinUrl: null, capeUrl: null, model: 'default', lastLoginAt: Date.now() };
+        mockState.accounts.push(acc); mockState.selectedAccount = acc;
+        setTimeout(() => resolve({ ok: true, channel: 'microsoft', account: acc }), 600);
+        break;
+      }
       case 'account:select': { mockState.selectedAccount = mockState.accounts.find((a) => a.id === args[0]); resolve(mockState); break; }
       case 'account:remove': { mockState.accounts = mockState.accounts.filter((a) => a.id !== args[0]); resolve(mockState); break; }
       case 'versions:select': { mockState.settings.selectedVersionId = args[0]; resolve(mockState); break; }
@@ -183,6 +189,9 @@ const mockApi = (channel, ...args) => new Promise((resolve) => {
         apiKeyMasked: (mockState.settings.global.ai && mockState.settings.global.ai.apiKey) ? 'sk-a****b123' : '',
         hasKey: !!(mockState.settings.global.ai && mockState.settings.global.ai.apiKey),
         autoAnalyze: mockState.settings.global.ai ? mockState.settings.global.ai.autoAnalyze !== false : true,
+        mode: (mockState.settings.global.ai && mockState.settings.global.ai.mode) || 'cloud',
+        localModelId: (mockState.settings.global.ai && mockState.settings.global.ai.localModelId) || 'smollm2-135m',
+        aiDevice: (mockState.settings.global.ai && mockState.settings.global.ai.aiDevice) || 'auto',
       }); break;
       case 'ai:setConfig': {
         const patch = args[0] || {};
@@ -225,6 +234,18 @@ const mockApi = (channel, ...args) => new Promise((resolve) => {
       case 'dialog:pickGameRoot': resolve('/预览模式/新的游戏目录'); break;
       case 'launcher:setGameRoot': { mockState.gameRoot = args[0]; mockState.settings.global.gameRootPrev = '/预览模式/.minecraft'; mockState.settings.global.gameRoot = args[0]; resolve({ ok: true, state: JSON.parse(JSON.stringify(mockState)) }); break; }
       case 'launcher:migrateGameRoot': { mockState.settings.global.gameRootPrev = ''; resolve({ ok: true, state: JSON.parse(JSON.stringify(mockState)) }); break; }
+      case 'saves:list': resolve({ ok: true, gameDir: '/预览模式/.minecraft', savesDir: '/预览模式/.minecraft/saves', worlds: [
+        { name: '极限世界', levelName: '极限世界', hardcore: true, corrupted: false, newLayout: true, oldLayout: false, gameVersion: '26.3', dataVersion: 4325, lastPlayed: Date.now() },
+        { name: '生存世界', levelName: '生存世界', hardcore: false, corrupted: false, newLayout: false, oldLayout: true, gameVersion: '1.21.8', dataVersion: 3953, lastPlayed: Date.now() - 86400000 },
+      ] }); break;
+      case 'saves:scanOtherLaunchers': resolve({ ok: true, candidates: [
+        { path: '/预览模式/PCL/.minecraft', label: 'PCL', savesDir: '/预览模式/PCL/.minecraft/saves', exists: true, worldCount: 2, worlds: [] },
+      ] }); break;
+      case 'saves:import': resolve({ ok: true, imported: ['极限世界'], skipped: [], worlds: [] }); break;
+      case 'saves:pickOtherRoot': resolve('/预览模式/别人的/.minecraft'); break;
+      case 'assets:check': resolve({ ok: true, reason: 'missing', missing: [{ name: 'minecraft/lang/zh_cn.json' }], installed: ['minecraft/lang/en_us.json'], indexId: '34', target: 'minecraft/lang/zh_cn.json', targetKnown: true, targetInstalled: false }); break;
+      case 'assets:repair': resolve({ ok: true, downloaded: 1, files: ['minecraft/lang/zh_cn.json'], targetInstalled: true }); break;
+      case 'ai:deviceInfo': resolve({ ok: true, device: 'webgpu', variant: 'q4f16', adapterInfo: { vendor: 'amd', architecture: 'rdna-2', device: '820m', description: 'Radeon 820M' }, f16: false, hasWebGPU: true, hasWebNN: false, webnnReason: '浏览器未提供 WebNN', gpuReason: '', crossOriginIsolated: true, hardwareConcurrency: 16, variantInstalled: true }); break;
       case 'wiki:patchNotes': {
         const id = args[0] || '1.20.1';
         resolve({
@@ -328,7 +349,7 @@ const api = window.cube
   : mockApi;
 const onEvent = window.cube ? (ch, cb) => window.cube.on(ch, cb) : mockOn;
 
-let state = null;
+let state = {};
 let manifestCache = null;
 let installing = null;
 let logLines = 0;
@@ -429,9 +450,10 @@ function sysMemMaxGB() {
   return Math.max(2, Math.min(32, Math.floor((sysMB - 512) / 1024)));
 }
 function currentVS() {
-  const vid = state.settings.selectedVersionId;
-  const g = state.settings.global;
-  const p = (vid && state.settings.perVersion[vid]) || {};
+  const st = state.settings || {};
+  const vid = st.selectedVersionId;
+  const g = st.global || {};
+  const p = (vid && (st.perVersion || {})[vid]) || {};
   return { ...g, ...p };
 }
 function renderSettingsCard() {
@@ -591,6 +613,8 @@ function renderSettingsPage() {
         ${esc(a.name)}<span class="sac-type">${ACCOUNT_TYPE_LABELS[a.type] || a.type}</span>
       </span>`).join('');
   }
+  renderSaves();
+  checkLangAssets();
 }
 function bindSettingsPage() {
   
@@ -685,10 +709,160 @@ function bindSettingsPage() {
     toast('旧数据已迁移到新游戏目录', true);
     await refresh();
   });
-  
+
+  $('sp-btn-saves-refresh').addEventListener('click', () => renderSaves());
+  $('sp-btn-saves-scan').addEventListener('click', () => scanOtherSaves());
+
+  const langCheck = $('sp-btn-lang-check');
+  if (langCheck) langCheck.addEventListener('click', () => checkLangAssets());
+  const langRepair = $('sp-btn-lang-repair');
+  if (langRepair) langRepair.addEventListener('click', () => repairLangAssets());
+
   $('sp-btn-check-update').addEventListener('click', () => checkUpdate(true));
-  
+
   $('sp-btn-open-account').addEventListener('click', () => openAccountModal());
+}
+
+async function checkLangAssets() {
+  const el = $('sp-lang-status');
+  if (!el) return { ok: false };
+  el.textContent = '正在检测…';
+  const r = await api('assets:check', {});
+  if (!r || !r.ok) {
+    el.textContent = '检测失败：' + ((r && r.error) || '未知错误');
+    return { ok: false };
+  }
+  if (r.reason === 'no-index') {
+    el.textContent = '这个版本没有资源索引（老版本自带语言文件），一般不会缺中文';
+    return { ok: true, reason: 'no-index' };
+  }
+  if (r.targetInstalled) {
+    el.textContent = '中文语言文件已就位（' + (r.installed || []).length + ' 个语言包）';
+    return { ok: true, reason: 'ok' };
+  }
+  el.textContent = '缺少中文语言文件（zh_cn.json），点「补全中文」下载';
+  return { ok: false, reason: 'missing', target: r.target };
+}
+
+async function repairLangAssets() {
+  const el = $('sp-lang-status');
+  if (!el) return;
+  el.textContent = '正在补全…';
+  const r = await api('assets:repair', {});
+  if (!r || !r.ok) {
+    el.textContent = '补全失败：' + ((r && r.error) || '未知错误');
+    toast('补全中文失败：' + ((r && r.error) || '未知错误'), false);
+    return;
+  }
+  el.textContent = '已补全 ' + (r.downloaded || 0) + ' 个语言文件';
+  toast('中文语言资源已补全，重进游戏即为中文', true);
+}
+
+function fmtWorldTime(ms) {
+  if (!ms) return '未知时间';
+  try {
+    const d = new Date(ms);
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  } catch { return '未知时间'; }
+}
+
+async function renderSaves() {
+  const list = $('sp-saves-list');
+  if (!list) return;
+  const r = await api('saves:list', {});
+  if (!r || !r.ok) {
+    list.innerHTML = '<div class="saves-empty">读取存档失败：' + esc((r && r.error) || '未知错误') + '</div>';
+    return;
+  }
+  $('sp-saves-dir').textContent = r.savesDir || '—';
+  const worlds = r.worlds || [];
+  if (!worlds.length) {
+    list.innerHTML = '<div class="saves-empty">当前游戏目录里没有存档。如果你在别的启动器（PCL / HMCL 等）里玩过，先把游戏目录设成同一个，或用下面的「从其他启动器导入」把存档搬过来。</div>';
+    return;
+  }
+  list.innerHTML = worlds.map((w) => {
+    const tags = [];
+    if (w.hardcore) tags.push('<span class="saves-tag hc">极限模式</span>');
+    if (w.corrupted) tags.push('<span class="saves-tag warn">level.dat 读不出</span>');
+    else if (w.oldLayout) tags.push('<span class="saves-tag warn">旧目录结构</span>');
+    if (!w.hardcore && !w.corrupted && !w.oldLayout) tags.push('<span class="saves-tag">生存模式</span>');
+    const ver = w.gameVersion ? w.gameVersion : '未知版本';
+    return '<div class="saves-row">'
+      + '<span class="saves-name">' + esc(w.levelName || w.name) + '</span>'
+      + tags.join('')
+      + '<span class="saves-meta">' + esc(ver) + ' · ' + esc(fmtWorldTime(w.lastPlayed)) + '</span>'
+      + '</div>';
+  }).join('');
+}
+
+async function scanOtherSaves() {
+  const list = $('sp-saves-list');
+  const r = await api('saves:scanOtherLaunchers', {});
+  if (!r || !r.ok) return toast('扫描失败：' + ((r && r.error) || '未知错误'));
+  const candidates = (r.candidates || []).filter((c) => c.exists && c.worldCount > 0);
+  if (!candidates.length) {
+    list.innerHTML = '<div class="saves-empty">没有在其他位置找到存档。可以点下面的按钮手动选择游戏目录。</div>';
+    list.insertAdjacentHTML('beforeend',
+      '<button class="btn-ghost btn-sm" id="sp-btn-saves-manual">手动选择目录…</button>');
+    const mb = $('sp-btn-saves-manual');
+    if (mb) mb.addEventListener('click', () => manualImport());
+    return;
+  }
+  list.innerHTML = '<div class="saves-empty">在其他位置找到以下存档目录，勾选后导入：</div>'
+    + candidates.map((c, i) => '<div class="saves-source">'
+      + '<input type="checkbox" class="saves-src-cb" data-i="' + i + '" />'
+      + '<span class="saves-name">' + esc(c.label) + '</span>'
+      + '<span class="saves-meta">' + c.worldCount + ' 个存档 · ' + esc(c.savesDir) + '</span>'
+      + '<button class="btn-ghost btn-sm" data-import="' + i + '">导入</button>'
+      + '</div>').join('');
+  list.querySelectorAll('[data-import]').forEach((btn) => {
+    btn.addEventListener('click', () => doImport(candidates[Number(btn.dataset.import)]));
+  });
+  const mb = list.querySelector('#sp-btn-saves-manual');
+  if (mb) mb.addEventListener('click', () => manualImport());
+  list.insertAdjacentHTML('beforeend', '<button class="btn-ghost btn-sm" id="sp-btn-saves-manual">手动选择目录…</button>');
+  const m2 = $('sp-btn-saves-manual');
+  if (m2) m2.addEventListener('click', () => manualImport());
+}
+
+async function manualImport() {
+  const dir = await api('saves:pickOtherRoot');
+  if (!dir) return;
+  const list = $('sp-saves-list');
+  const info = await api('saves:list', { gameDir: dir });
+  if (!info || !info.ok) return toast('读取失败：' + ((info && info.error) || '未知错误'));
+  const worlds = info.worlds || [];
+  if (!worlds.length) return toast('该目录里没有存档');
+  list.innerHTML = '<div class="saves-empty">来自 ' + esc(dir) + '，勾选后导入：</div>'
+    + worlds.map((w, i) => '<div class="saves-source">'
+      + '<input type="checkbox" class="saves-world-cb" data-n="' + esc(w.name) + '" ' + (i < 99 ? 'checked' : '') + ' />'
+      + '<span class="saves-name">' + esc(w.levelName || w.name) + '</span>'
+      + (w.hardcore ? '<span class="saves-tag hc">极限模式</span>' : '')
+      + '<span class="saves-meta">' + esc(w.gameVersion || '未知版本') + '</span>'
+      + '</div>').join('')
+    + '<button class="btn btn-sm" id="sp-btn-saves-do-import">导入所选</button>';
+  const doBtn = $('sp-btn-saves-do-import');
+  if (doBtn) doBtn.addEventListener('click', () => doImport({ path: dir }, true));
+}
+
+async function doImport(candidate, pickWorlds) {
+  if (!candidate || !candidate.path) return;
+  let names = null;
+  if (pickWorlds) {
+    names = [];
+    document.querySelectorAll('.saves-world-cb:checked').forEach((cb) => names.push(cb.dataset.n));
+    if (!names.length) return toast('请至少勾选一个存档');
+  }
+  const dest = state && state.gameRoot ? state.gameRoot : '';
+  const r = await api('saves:import', { srcRoot: candidate.path, destRoot: dest, names });
+  if (!r || !r.ok) return toast('导入失败：' + ((r && r.error) || '未知错误'));
+  const imp = r.imported || [];
+  const skip = r.skipped || [];
+  let msg = imp.length ? '已导入 ' + imp.length + ' 个存档' : '没有可导入的新存档';
+  if (skip.length) msg += '，跳过 ' + skip.length + ' 个同名存档';
+  toast(msg, true);
+  await renderSaves();
 }
 
 const up = { checking: false, downloading: false, info: null };
@@ -740,6 +914,7 @@ async function checkUpdate(manual) {
 }
 function openUpdateModal(info) {
   up.info = info;
+  up.updateReady = false;
   $('um-cur').textContent = 'v' + (info.current);
   $('um-new').textContent = 'v' + info.latest;
   $('um-notes').innerHTML = fmtUpdateNotes(info.notes);
@@ -758,10 +933,19 @@ function openUpdateModal(info) {
   $('modal-update').hidden = false;
 }
 function bindUpdateModal() {
-  $('um-btn-download').addEventListener('click', async () => {
+  const btn = $('um-btn-download');
+  btn.onclick = async () => {
     if (up.downloading) return;
+    if (up.updateReady) {
+      btn.disabled = true; btn.textContent = '正在重启…';
+      const ar = await api('updater:apply');
+      if (ar && ar.ok === false) {
+        toast('安装失败：' + (ar.error || '未知错误'));
+        btn.disabled = false; btn.textContent = '立即重启并安装';
+      }
+      return;
+    }
     up.downloading = true;
-    const btn = $('um-btn-download');
     btn.disabled = true; btn.textContent = '下载中 0%';
     $('um-progress').hidden = false;
     $('um-pfill').style.width = '0%';
@@ -771,25 +955,22 @@ function bindUpdateModal() {
       if (!r || !r.ok) {
         toast('下载失败：' + ((r && r.error) || '未知错误'));
         btn.textContent = '重试下载';
+        btn.disabled = false;
         return;
       }
       $('um-pfill').style.width = '100%';
       $('um-ptext').textContent = '下载完成，可以安装了';
+      up.updateReady = true;
       btn.textContent = '立即重启并安装';
       btn.disabled = false;
-      btn.onclick = async () => {
-        btn.disabled = true; btn.textContent = '正在重启…';
-        const ar = await api('updater:apply');
-        if (ar && ar.ok === false) { toast('安装失败：' + (ar.error || '未知错误')); btn.disabled = false; btn.textContent = '立即重启并安装'; }
-        
-      };
     } catch (e) {
       toast('下载失败：' + ((e && e.message) || e));
       btn.textContent = '重试下载';
+      btn.disabled = false;
     } finally {
       up.downloading = false;
     }
-  });
+  };
   onEvent('launcher://up-progress', (p) => {
     if ($('modal-update').hidden) return;
     if (p.stage === 'error') { $('um-ptext').textContent = p.message || '下载出错'; return; }
@@ -908,10 +1089,13 @@ async function loadVerList() {
           if (!list2.length) { toast(`未获取到 ${label} 版本列表`, false); return; }
           const want = window.prompt(`安装 ${v.id} 的哪个 ${label} 版本？\n（当前目录版本：${(cat[v.type] || {})[v.id] || '未知'}）`, list2[0]);
           if (!want) return;
-          const r = await api('versions:installLoader', { loader: v.type, mc: v.id, version: want.trim() });
+          const r = v.type === 'fabric'
+            ? await api('versions:installFabric', { mc: v.id, version: want.trim() })
+            : await api('versions:installLoader', { loader: v.type, mc: v.id, version: want.trim() });
           if (r && r.ok) {
             toast(`${v.id} ${label} ${want.trim()} 安装完成`, true);
-            if (r.id) await api('versions:select', r.id);
+            const newId = (r.result && r.result.id) || r.id;
+            if (newId) await api('versions:select', newId);
             await refresh(); loadVerList();
           } else toast((r && r.error) || '安装失败', false);
         };
@@ -929,7 +1113,7 @@ async function loadVerList() {
             ? await api('versions:installFabric', v.id)
             : await api('versions:installLoader', { loader: v.type, mc: v.id });
           installing = null;
-          if (r.ok) {
+          if (r && r.ok) {
             toast(`${v.id} ${label} 安装完成`, true);
             
             const newId = (r.result && r.result.id) || r.id || v.loaderInstance;
@@ -949,7 +1133,7 @@ async function loadVerList() {
         installing = { id: v.id, btn };
         const r = await api('versions:install', v.id);
         installing = null;
-        if (r.ok) { toast(`${v.id} 安装完成`, true); await api('versions:select', v.id); closeModal('modal-version'); await refresh(); }
+        if (r && r.ok) { toast(`${v.id} 安装完成`, true); await api('versions:select', v.id); closeModal('modal-version'); await refresh(); }
         else { toast(r.error); btn.disabled = false; btn.textContent = '安装'; }
       };
     }
@@ -965,13 +1149,14 @@ function openAccountModal() {
 function renderAccountList() {
   const wrap = $('account-list-wrap');
   const list = $('account-list');
-  if (!state.accounts.length) { wrap.hidden = true; return; }
+  const accs = state.accounts || [];
+  if (!accs.length) { wrap.hidden = true; return; }
   wrap.hidden = false;
   list.innerHTML = '';
-  for (const a of state.accounts) {
+  for (const a of accs) {
     const row = document.createElement('div');
     row.className = 'acc-row' + (state.selectedAccount && state.selectedAccount.id === a.id ? ' sel' : '');
-    row.innerHTML = `<span class="aname">${a.name}</span><span class="atype">${a.type === 'yggdrasil' ? 'LittleSkin' : a.type === 'microsoft' ? '微软正版' : '离线'} · ${a.uuid.slice(0, 8)}…</span>`;
+    row.innerHTML = `<span class="aname">${esc(a.name || '')}</span><span class="atype">${a.type === 'yggdrasil' ? 'LittleSkin' : a.type === 'microsoft' ? '微软正版' : '离线'} · ${String(a.uuid || '').slice(0, 8)}…</span>`;
     const acts = document.createElement('div');
     acts.className = 'arow-actions';
     if (!(state.selectedAccount && state.selectedAccount.id === a.id)) {
@@ -1056,8 +1241,9 @@ function onProgress(p) {
 let refreshSeq = 0;
 async function refresh() {
   const seq = ++refreshSeq;
-  state = await api('launcher:getState');
+  const s = await api('launcher:getState');
   if (seq !== refreshSeq) return;
+  state = s || {};
   await renderAccountCard();
   if (seq !== refreshSeq) return;
   renderVersionCard();
@@ -1118,7 +1304,7 @@ function bindUI() {
   }));
   document.querySelectorAll('.mtab[data-atab]').forEach((t) => (t.onclick = () => {
     document.querySelectorAll('.mtab[data-atab]').forEach((x) => x.classList.toggle('active', x === t));
-    ['offline', 'littleskin', 'microsoft'].forEach((k) => ($(`atab-${k}`).hidden = t.dataset.atab !== k));
+    ['offline', 'littleskin', 'password', 'microsoft'].forEach((k) => ($(`atab-${k}`).hidden = t.dataset.atab !== k));
   }));
   $('ver-search').addEventListener('input', (e) => { verSearch = e.target.value.trim(); loadVerList(); });
 
@@ -1148,7 +1334,7 @@ function bindUI() {
     $('ms-code').textContent = '······';
     $('ms-status').textContent = '正在获取设备码…';
     const r = await api('account:loginMicrosoft');
-    if (r.ok) {
+    if (r && r.ok) {
       $('ms-status').textContent = '登录成功';
       await refresh(); renderAccountList();
       toast(`微软账号 ${r.account.name} 登录成功`, true);
@@ -1165,6 +1351,45 @@ function bindUI() {
     $('ms-code').textContent = p.userCode;
     $('ms-status').textContent = '等待授权…（在浏览器输入代码完成登录）';
     if (p.verificationUri) $('btn-ms-open').onclick = () => api('shell:openExternal', p.verificationUri);
+  });
+
+  const pwdStatus = (text, isErr) => {
+    const el = $('pwd-status');
+    el.hidden = false;
+    el.textContent = text;
+    el.style.color = isErr ? 'var(--red, #f85149)' : 'var(--muted)';
+  };
+  $('btn-pwd-login').onclick = async () => {
+    const btn = $('btn-pwd-login');
+    const email = $('pwd-user').value.trim();
+    const password = $('pwd-pass').value;
+    const apiRoot = $('pwd-api').value.trim();
+    if (!email || !password) return toast('请输入账号与密码');
+    btn.disabled = true; btn.textContent = '登录中…';
+    pwdStatus('正在验证账号…');
+    try {
+      const r = await api('account:loginMicrosoftPassword', { email, password, apiRoot });
+      if (r && r.ok) {
+        pwdStatus('登录成功');
+        $('pwd-pass').value = '';
+        await refresh(); renderAccountList();
+        toast(`账号 ${r.account.name} 登录成功（${r.channel === 'yggdrasil' ? '皮肤站' : '微软正版'}）`, true);
+      } else {
+        const msg = (r && r.error) || '登录失败';
+        pwdStatus(msg + ((r && r.hint) ? '｜' + r.hint : ''), true);
+        toast('登录失败：' + msg);
+      }
+    } catch (e) {
+      pwdStatus('登录失败：' + (e && e.message || e), true);
+    }
+    btn.disabled = false; btn.textContent = '使用账号密码登录';
+  };
+  onEvent('launcher://ms-password-status', (p) => {
+    if (!p || !p.phase) return;
+    if (p.phase === 'filled' && p.field === 'email') pwdStatus('已填入账号，等待微软页面…');
+    else if (p.phase === 'filled' && p.field === 'password') pwdStatus('已填入密码，正在提交…');
+    else if (p.phase === 'await-password') pwdStatus('账号已提交，等待密码页…');
+    else if (p.phase === 'awaiting-token') pwdStatus('正在获取微软令牌…');
   });
 
   
@@ -1399,21 +1624,23 @@ async function dlLoaderLoadApiVersion() {
   }
 }
 
+let dlLoaderRenderSeq = 0;
 async function dlLoaderRender() {
+  const seq = ++dlLoaderRenderSeq;
+  const loader = dlLoader.loader;
+  const mc = dlLoader.mc;
+  const search = dlLoader.search;
   const box = $('dl-loader-list');
   box.innerHTML = '<div class="dl-empty">加载中…</div>';
-  const r = await api('versions:loaderVersions', { loader: dlLoader.loader, mc: dlLoader.mc });
-  if (dlLoader.search) {
-    
-  }
+  const r = await api('versions:loaderVersions', { loader, mc });
+  if (seq !== dlLoaderRenderSeq) return;
   if (!r || !r.ok) {
     box.innerHTML = `<div class="dl-empty">${esc((r && r.error) || '获取加载器版本失败')}</div>`;
     return;
   }
-  dlLoader.versions = r.versions || [];
-  const list = dlLoader.search
-    ? dlLoader.versions.filter((v) => String(v).includes(dlLoader.search))
-    : dlLoader.versions;
+  const allVersions = r.versions || [];
+  dlLoader.versions = allVersions;
+  const list = search ? allVersions.filter((v) => String(v).includes(search)) : allVersions;
   if (!list.length) {
     box.innerHTML = '<div class="dl-empty">该游戏版本暂无可用的加载器版本</div>';
     return;
@@ -1423,21 +1650,21 @@ async function dlLoaderRender() {
     const row = document.createElement('div');
     row.className = 'ver-row';
     row.innerHTML = `<span class="vname">${esc(v)}</span>` +
-      `<span class="vtype ${dlLoader.loader}">${LOADER_LABELS[dlLoader.loader]}</span>` +
-      `<span class="vmeta">${esc(dlLoader.mc)}</span>`;
+      `<span class="vtype ${loader}">${LOADER_LABELS[loader]}</span>` +
+      `<span class="vmeta">${esc(mc)}</span>`;
     const btn = document.createElement('button');
     btn.className = 'btn';
     btn.textContent = '安装';
     btn.onclick = async () => {
       btn.disabled = true;
       btn.textContent = '安装中…';
-      const withApi = dlLoader.loader === 'fabric' && ($('dl-fabric-api') || {}).checked !== false;
-      const r2 = dlLoader.loader === 'fabric'
-        ? await api('versions:installFabric', { mc: dlLoader.mc, version: v, withFabricApi: withApi })
-        : await api('versions:installLoader', { loader: dlLoader.loader, mc: dlLoader.mc, version: v });
+      const withApi = loader === 'fabric' && ($('dl-fabric-api') || {}).checked !== false;
+      const r2 = loader === 'fabric'
+        ? await api('versions:installFabric', { mc, version: v, withFabricApi: withApi })
+        : await api('versions:installLoader', { loader, mc, version: v });
       if (r2 && r2.ok) {
         const apiInfo = r2.result && r2.result.fabricApi;
-        let msg = `${dlLoader.mc} ${LOADER_LABELS[dlLoader.loader]} ${v} 安装完成`;
+        let msg = `${mc} ${LOADER_LABELS[loader]} ${v} 安装完成`;
         if (apiInfo && apiInfo.version) msg += `，Fabric API ${apiInfo.version} 已装好`;
         else if (apiInfo && apiInfo.skipped) msg += `（${apiInfo.skipped}）`;
         toast(msg, true);
@@ -1850,7 +2077,6 @@ function wikiBrowserOnReady() {
       const scrolled = await view.executeJavaScript(`
         (() => {
           try {
-            // 中文 wiki 顶部横幅很高，直接滚到信息表（infobox）所在位置
             const info = document.querySelector('.infobox');
             const box = document.querySelector('.mw-parser-output');
             let y = 0;
@@ -2167,15 +2393,6 @@ async function onlineJoin() {
   msg.className = 'on-join-msg';
   msg.textContent = '正在连接…';
   try {
-    
-    const probe = await api('online:probe', { address: input });
-    if (probe && probe.ok && probe.result && probe.result.ok === false) {
-      msg.className = 'on-join-msg err';
-      msg.textContent = '连不上：' + (probe.result.reason || '未知原因');
-      btn.disabled = false;
-      return;
-    }
-    
     const versionId = online.versionId || (state && state.settings && state.settings.selectedVersionId);
     if (!versionId) {
       msg.className = 'on-join-msg err';
@@ -2183,10 +2400,19 @@ async function onlineJoin() {
       btn.disabled = false;
       return;
     }
+    let warn = '';
+    try {
+      const probe = await api('online:probe', { address: input });
+      if (probe && probe.ok && probe.result && probe.result.ok === false) {
+        warn = '（探测未通过：' + (probe.result.reason || '未知原因') + '，仍会尝试启动）';
+      }
+    } catch {}
+
+    msg.textContent = '正在启动游戏…';
     const r = await api('online:joinServer', { address: input, versionId });
     if (r && r.ok) {
       msg.className = 'on-join-msg ok';
-      msg.textContent = '已启动游戏并自动连接 ' + input + '（若没自动进服，手动点多人游戏→添加服务器）';
+      msg.textContent = '已启动游戏，正在自动连接 ' + input + (warn || '（若没自动进服，手动点多人游戏→添加服务器）');
       toast('正在启动游戏并连接 ' + input, true);
     } else {
       msg.className = 'on-join-msg err';
