@@ -16,9 +16,10 @@ const aiServer = require('./ai-server');
 const fabricApi = require('./fabric-api');
 const wikiProbe = require('./wiki-probe');
 const onlineTunnel = require('./online-tunnel');
+const msLoginWindow = require('./ms-login-window');
 
 const LAUNCHER_NAME = 'NCL';
-const LAUNCHER_VERSION = '1.9.0';
+const LAUNCHER_VERSION = '1.10.1';
 const MANIFEST_URL = 'https://piston-meta.mojang.com/mc/game/version_manifest_v2.json';
 const JAVA_MANIFEST_URL = 'https://launchermeta.mojang.com/v1/products/java-runtime/2ec0cc96c44e5a76b9c8b7c39df7210883d12871/all.json';
 const GITHUB_REPO = '911q2w3e1q/ncl';
@@ -176,15 +177,17 @@ async function downloadFile(url, dest, opts = {}) {
   ensureDir(path.dirname(dest));
   let lastErr = null;
   for (let attempt = 1; attempt <= retries; attempt++) {
+    let timer = null;
     try {
       const ac = new AbortController();
-      const timer = setTimeout(() => ac.abort(), timeout);
+      timer = setTimeout(() => ac.abort(), timeout);
       const res = await fetch(url, { signal: ac.signal, redirect: 'follow' });
-      clearTimeout(timer);
       if (!res.ok) throw new Error(`HTTP ${res.status} ${url}`);
       const total = Number(res.headers.get('content-length') || 0);
       let loaded = 0;
-      let lastTick = Date.now();
+      const t0 = Date.now();
+      let lastTick = t0;
+      let lastLoaded = 0;
       const tmp = dest + '.part';
       const ws = fs.createWriteStream(tmp);
       const bodyStream = Readable.fromWeb(res.body);
@@ -192,10 +195,17 @@ async function downloadFile(url, dest, opts = {}) {
         bodyStream.on('data', (chunk) => {
           loaded += chunk.length;
           const now = Date.now();
-          if (onProgress && now - lastTick > 200) {
+          if (onProgress && now - lastTick >= 200) {
+            const speed = (loaded - lastLoaded) / Math.max(0.001, (now - lastTick) / 1000);
             lastTick = now;
-            const speed = loaded / Math.max(0.001, (now - (opts._t0 || now)) / 1000);
-            onProgress({ loaded, total, speed, file: path.basename(dest) });
+            lastLoaded = loaded;
+            onProgress({
+              loaded,
+              total,
+              speed,
+              percent: total ? Math.min(100, Math.round((loaded / total) * 100)) : 0,
+              file: path.basename(dest)
+            });
           }
         });
         bodyStream.on('error', reject);
@@ -212,6 +222,8 @@ async function downloadFile(url, dest, opts = {}) {
     } catch (e) {
       lastErr = e;
       if (attempt < retries) await sleep(800 * attempt);
+    } finally {
+      if (timer) clearTimeout(timer);
     }
   }
   throw new Error(`下载失败: ${url} -> ${lastErr && lastErr.message}`);
@@ -276,6 +288,9 @@ function extractZip(file, dest) {
     };
     child.on('message', (m) => finish(m.ok ? resolve : reject, m.ok ? undefined : new Error(m.error || '解压失败')));
     child.on('error', (e) => finish(reject, e));
+    child.on('exit', (code) => {
+      if (code !== 0) finish(reject, new Error(`解压进程异常退出，退出码 ${code}`));
+    });
     child.send({ file, dest });
   });
 }
@@ -785,7 +800,8 @@ async function runCrashAnalysis(trigger, extra) {
 }
 
 function versionSettings(settings, versionId) {
-  return { ...settings.global, ...(settings.perVersion[versionId] || {}) };
+  const s = settings || {};
+  return { ...(s.global || {}), ...((s.perVersion || {})[versionId] || {}) };
 }
 
 const COMPONENT_BY_MAJOR = { 8: 'jre-legacy', 16: 'java-runtime-alpha', 17: 'java-runtime-gamma', 21: 'java-runtime-delta', 25: 'java-runtime-epsilon' };
@@ -1050,8 +1066,15 @@ async function installVersion(versionId, onProgress, mirrorBase = null) {
   let libDone = 0;
   const nativesDir = path.join(vdir, 'natives');
   onProgress({ stage: 'libraries', message: `下载依赖库 (0/${libs.length})`, percent: 0, speed: 0, loaded: 0, total: libs.length });
+  const libRoot = path.resolve(P.libraries);
+  const safeLibPath = (rel) => {
+    const t = path.resolve(libRoot, String(rel || ''));
+    if (t !== libRoot && !t.startsWith(libRoot + path.sep)) return null;
+    return t;
+  };
   await mapLimit(libs, 8, async ({ lib, artifact, mirrors }) => {
-    const dest = path.join(P.libraries, artifact.path);
+    const dest = safeLibPath(artifact.path);
+    if (!dest) return;
     
     const libMirrors = b
       ? [`${b}/maven/${artifact.path}`, ...(mirrors || []).filter((u) => u !== artifact.url)]
@@ -1063,7 +1086,8 @@ async function installVersion(versionId, onProgress, mirrorBase = null) {
     if (lib.natives && lib.natives[osName()]) {
       const cls = lib.downloads.classifiers && lib.downloads.classifiers[lib.natives[osName()]];
       if (cls) {
-        const zipPath = path.join(P.libraries, cls.path);
+        const zipPath = safeLibPath(cls.path);
+        if (!zipPath) return;
         await downloadArtifact(zipPath, cls, [cls.url]);
         if (zipPath.endsWith('.zip')) {
           const tmp = path.join(P.libraries, 'natives-tmp', path.basename(zipPath, '.zip'));
@@ -1196,7 +1220,7 @@ const QUILT_META = 'https://meta.quiltmc.org/v3';
 const QUILT_MAVEN = 'https://maven.quiltmc.org/repository/release';
 
 const QUILT_INSTALLER_VER = '0.15.1';
-const LOADER_LABELS = { forge: 'Forge', neoforge: 'NeoForge', quilt: 'Quilt' };
+const LOADER_LABELS = { fabric: 'Fabric', forge: 'Forge', neoforge: 'NeoForge', quilt: 'Quilt' };
 
 function sortVersionsDesc(vers) {
   const key = (v) => {
@@ -1372,6 +1396,7 @@ async function runLoaderInstaller(kind, jarPath, mc, loaderVer, onProgress) {
 
 async function installLoader(kind, mc, onProgress, wantVersion = '') {
   if (!LOADER_LABELS[kind]) throw new Error(`未知的模组加载器：${kind}`);
+  if (kind === 'fabric') throw new Error('Fabric 请使用独立的安装流程');
   const latest = {
     forge: async () => (await listForgeVersions(mc))[0],
     neoforge: async () => neoforgeForMC(mc, await listNeoForgeAll())[0],
@@ -1399,6 +1424,27 @@ async function installLoader(kind, mc, onProgress, wantVersion = '') {
 const PLACEHOLDER_DOCS = {
   natives_directory: '', library_directory: '', classpath_separator: process.platform === 'win32' ? ';' : ':',
 };
+
+function splitArgs(str) {
+  const out = [];
+  let cur = '';
+  let quote = null;
+  for (const ch of String(str)) {
+    if (quote) {
+      if (ch === quote) quote = null;
+      else cur += ch;
+      continue;
+    }
+    if (ch === '"' || ch === "'") { quote = ch; continue; }
+    if (/\s/.test(ch)) {
+      if (cur) { out.push(cur); cur = ''; }
+      continue;
+    }
+    cur += ch;
+  }
+  if (cur) out.push(cur);
+  return out;
+}
 
 function safeMemoryMB(want) {
   const sysMB = Math.floor(os.totalmem() / 1024 / 1024);
@@ -1442,7 +1488,10 @@ function buildLaunchCommand(versionId, account, settings) {
 
   
   const cp = [path.join(P.versions, versionId, `${versionId}.jar`)];
-  for (const { artifact } of applicableLibraries(vjson)) cp.push(path.join(P.libraries, artifact.path));
+  for (const { artifact } of applicableLibraries(vjson)) {
+    const p = path.resolve(P.libraries, String(artifact.path || ''));
+    if (p.startsWith(path.resolve(P.libraries) + path.sep)) cp.push(p);
+  }
   const classpath = cp.join(process.platform === 'win32' ? ';' : ':');
 
   const log4jFile = path.join(P.versions, versionId, 'log4j2.xml');
@@ -1469,6 +1518,10 @@ function buildLaunchCommand(versionId, account, settings) {
     resolution_width: String(vs.width || 854),
     resolution_height: String(vs.height || 480),
     quickPlayPath: '', quickPlaySingleplayer: '', quickPlayMultiplayer: server, quickPlayRealms: '',
+    lang: 'zh_cn',
+    user_properties: '{}',
+    game_assets: P.assets,
+    auth_session: `token:${account.accessToken || '0'}:${account.uuid || '0'}`,
   };
   const subst = (s) => String(s).replace(/\$\{(\w+)\}/g, (m, k) => (k in vars ? vars[k] : m));
 
@@ -1502,7 +1555,7 @@ function buildLaunchCommand(versionId, account, settings) {
       `-Dminecraft.api.profiles.host=${root}/api`,
     );
   }
-  if (vs.jvmArgs && vs.jvmArgs.trim()) jvmArgs.push(...vs.jvmArgs.trim().split(/\s+/));
+  if (vs.jvmArgs && vs.jvmArgs.trim()) jvmArgs.push(...splitArgs(vs.jvmArgs.trim()));
 
   
   const gameArgs = [];
@@ -1523,7 +1576,7 @@ function buildLaunchCommand(versionId, account, settings) {
       }
     }
   } else if (vjson.minecraftArguments) {
-    for (const a of subst(vjson.minecraftArguments).split(/\s+/)) gameArgs.push(a);
+    for (const a of splitArgs(subst(vjson.minecraftArguments))) gameArgs.push(a);
   }
   
   if (!gameArgs.includes('--lang')) gameArgs.push('--lang', 'zh_cn');
@@ -1540,6 +1593,7 @@ function buildLaunchCommand(versionId, account, settings) {
 
 let gameProc = null;
 let launching = false;
+let stopping = false;
 
 async function launchGame(versionId, onLog) {
   if (launching) throw new Error('正在启动中，请稍候');
@@ -1589,15 +1643,13 @@ async function launchGame(versionId, onLog) {
         if (settled) return;
         settled = true;
         gameProc = null;
-        if (win) win.webContents.send('launcher://game-exit', { code: null, error: `无法启动游戏进程：${err.message}` });
         reject(new Error(`无法启动游戏进程：${err.message}`));
       });
       proc.on('exit', (code, signal) => {
         if (settled) return;
         settled = true;
         gameProc = null;
-        
-        const crashed = (code !== 0 && code !== null) || !!signal;
+        const crashed = !stopping && ((code !== 0 && code !== null) || !!signal);
         if (crashed) {
           const cfg = getAiConfig();
           if (cfg.enabled && cfg.autoAnalyze) {
@@ -1619,8 +1671,10 @@ async function launchGame(versionId, onLog) {
 
 function stopGame() {
   if (!gameProc) return false;
+  stopping = true;
   try { gameProc.kill(); } catch {}
   gameProc = null;
+  setTimeout(() => { stopping = false; }, 3000);
   return true;
 }
 
@@ -1661,6 +1715,10 @@ function createWindow() {
   const modal = process.env.CUBE_MODAL ? `&modal=${encodeURIComponent(process.env.CUBE_MODAL)}` : '';
   const q = page ? `?page=${encodeURIComponent(page)}&dlhover=1${cat ? `&dlcat=${encodeURIComponent(cat)}` : ''}${src ? `&dlsrc=${encodeURIComponent(src)}` : ''}${scat ? `&scat=${encodeURIComponent(scat)}` : ''}${drop}${droptype}${wikiq}${wikatb}${wikiv}${wikidetail}${modal}` : `${drop}${droptype}${wikiq}${wikatb}${wikiv}${wikidetail}${modal}`.replace(/^&/, '?');
   const indexUrl = pathToFileURL(path.join(__dirname, '..', 'renderer', 'index.html')).href + q;
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+    return { action: 'deny' };
+  });
   win.loadURL(indexUrl);
   
   if (process.env.CUBE_SCREENSHOT) {
@@ -1839,8 +1897,14 @@ async function installModpack(payload, onProgress) {
     const files = index.files || [];
     let done = 0;
     onProgress({ stage: 'files', message: `下载整合包文件 (0/${files.length})`, percent: 0, speed: 0 });
+    const gameRoot = path.resolve(gameDir);
     await mapLimit(files, 6, async (f) => {
-      const dest = path.join(gameDir, f.path);
+      const rel = String((f && f.path) || '');
+      const dest = path.resolve(gameRoot, rel);
+      if (!rel || (dest !== gameRoot && !dest.startsWith(gameRoot + path.sep))) {
+        done++;
+        return;
+      }
       done++;
       if (exists(dest)) return;
       const url = (f.downloads || [])[0];
@@ -2086,7 +2150,7 @@ async function updaterApply() {
   saveSettings(s2);
 
   const child = kind === 'bat'
-    ? spawn('cmd.exe', ['/c', scriptPath], { detached: true, stdio: 'ignore', windowsVerbatimArguments: true })
+    ? spawn('cmd.exe', ['/c', `"${scriptPath}"`], { detached: true, stdio: 'ignore', windowsVerbatimArguments: true })
     : spawn('/bin/bash', [scriptPath], { detached: true, stdio: 'ignore' });
   child.unref();
   app.quit();
@@ -2150,8 +2214,8 @@ function getState() {
     launcherDir: LAUNCHER_DIR,
     launcherVersion: LAUNCHER_VERSION,
     sysMemoryMB: Math.floor(os.totalmem() / 1024 / 1024),
-    accounts: accounts.map((a) => ({ ...a, accessToken: undefined })),
-    selectedAccount: account ? { ...account, accessToken: undefined } : null,
+    accounts: accounts.map((a) => ({ ...a, accessToken: undefined, refreshToken: undefined })),
+    selectedAccount: account ? { ...account, accessToken: undefined, refreshToken: undefined } : null,
     settings,
     installed: listInstalled(),
     running: !!gameProc,
@@ -2210,6 +2274,70 @@ function registerIPC() {
     const acc = d.accounts.find((a) => a.id === id);
     if (acc) { await refreshAccountTextures(acc); saveAccounts(d); }
     return getState();
+  });
+
+  ipcMain.handle('account:loginMicrosoftPassword', async (_, payload) => {
+    const email = String((payload && payload.email) || '').trim();
+    const password = String((payload && payload.password) || '');
+    const apiRoot = String((payload && payload.apiRoot) || '').trim();
+    if (!email) return { ok: false, error: '请输入账号（邮箱）' };
+    if (!password) return { ok: false, error: '请输入密码' };
+
+    const yggApi = apiRoot || 'https://littleskin.cn/api/yggdrasil';
+    let yggErr = null;
+    if (/^https?:\/\//.test(yggApi)) {
+      try {
+        const acc = await yggdrasilLogin({ apiRoot: yggApi.replace(/\/+$/, ''), username: email, password });
+        const d = loadAccounts();
+        d.accounts = d.accounts.filter((a) => !(a.type === ACCOUNT_TYPES.YGGDRASIL && a.uuid === acc.uuid));
+        d.accounts.push(acc); d.selectedId = acc.id;
+        saveAccounts(d);
+        return { ok: true, channel: 'yggdrasil', account: { ...acc, accessToken: undefined } };
+      } catch (e) {
+        yggErr = e.message || String(e);
+      }
+    }
+
+    try {
+      const token = await new Promise((resolve, reject) => {
+        msLoginWindow.openEmbeddedLogin({
+          email, password,
+          parent: win,
+          onStatus: (s) => {
+            if (!win) return;
+            if (s.phase === 'error') reject(new Error(s.error));
+            else if (s.phase === 'token') resolve(s.token);
+            else win.webContents.send('launcher://ms-password-status', s);
+          },
+        }).catch(reject);
+      });
+      const info = await msExchangeToken(token.access_token);
+      const acc = {
+        id: crypto.randomUUID(),
+        type: ACCOUNT_TYPES.MICROSOFT,
+        name: info.name,
+        uuid: info.uuid,
+        xuid: info.xuid,
+        accessToken: info.accessToken,
+        refreshToken: token.refresh_token || '',
+        expiresAt: Date.now() + Number(token.expires_in || 86400) * 1000,
+        skinUrl: info.skinUrl,
+        capeUrl: info.capeUrl,
+        model: info.model,
+        lastLoginAt: Date.now(),
+      };
+      const d = loadAccounts();
+      d.accounts = d.accounts.filter((a) => !(a.type === ACCOUNT_TYPES.MICROSOFT && a.uuid === acc.uuid));
+      d.accounts.push(acc); d.selectedId = acc.id;
+      saveAccounts(d);
+      return { ok: true, channel: 'microsoft', account: { ...acc, accessToken: undefined, refreshToken: undefined } };
+    } catch (e) {
+      const msg = e.message || String(e);
+      const hint = /不是有效的微软账号|不是微软/.test(msg)
+        ? '该账号在皮肤站与微软均未通过验证，请确认邮箱与密码是否正确'
+        : (/用户名或密码错误|密码错误|Incorrect username/.test(yggErr || '') ? '该账号在皮肤站验证失败（密码错误），已改用微软登录' : '');
+      return { ok: false, error: msg, hint, yggError: yggErr || '' };
+    }
   });
 
   ipcMain.handle('account:loginMicrosoft', async () => {
@@ -2343,7 +2471,10 @@ function registerIPC() {
   });
 
   ipcMain.handle('versions:delete', (_, id) => {
-    fs.rmSync(path.join(paths().versions, id), { recursive: true, force: true });
+    const vdir = path.resolve(paths().versions, String(id || ''));
+    const vroot = path.resolve(paths().versions);
+    if (!vdir.startsWith(vroot + path.sep) || vdir === vroot) return { ok: false, error: '非法的版本路径' };
+    fs.rmSync(vdir, { recursive: true, force: true });
     const s = loadSettings();
     if (s.selectedVersionId === id) s.selectedVersionId = null;
     saveSettings(s);
@@ -2353,7 +2484,12 @@ function registerIPC() {
   ipcMain.handle('settings:save', (_, patch) => {
     const s = loadSettings();
     if (patch.global) s.global = { ...s.global, ...patch.global };
-    if (patch.perVersion) s.perVersion = { ...s.perVersion, ...patch.perVersion };
+    if (patch.perVersion) {
+      s.perVersion = s.perVersion || {};
+      for (const [vid, cfg] of Object.entries(patch.perVersion)) {
+        s.perVersion[vid] = { ...(s.perVersion[vid] || {}), ...(cfg || {}) };
+      }
+    }
     if ('selectedVersionId' in patch) s.selectedVersionId = patch.selectedVersionId;
     saveSettings(s);
     return getState();
@@ -2551,7 +2687,12 @@ function registerIPC() {
   ipcMain.handle('ai:analyze', async (_, payload) => {
     try {
       const result = await runCrashAnalysis((payload && payload.trigger) || 'manual', payload || {});
-      return { ok: result.ok, error: result.error, analysis: result.analysis };
+      return {
+        ok: result.ok,
+        error: result.error,
+        analysis: result.analysis,
+        versionId: (lastGameContext && lastGameContext.versionId) || loadSettings().selectedVersionId || ''
+      };
     } catch (e) {
       return { ok: false, error: e.message };
     }
@@ -2811,20 +2952,26 @@ if (process.env.CUBE_TEST_MODE !== '1') {
         pathname = decodeURIComponent(u.pathname).replace(/^\/+/, '');
       } catch { return new Response('Bad Request', { status: 400 }); }
       const segs = pathname.split('/').filter(Boolean);
+      const safeJoin = (base, parts) => {
+        const root = path.resolve(base);
+        const target = path.resolve(root, ...parts.filter(Boolean));
+        if (target !== root && !target.startsWith(root + path.sep)) return null;
+        return target;
+      };
       let file = '';
       if (host === 'model') {
-        
         const rel = segs.slice(2).join('/');
         const repo = segs.slice(0, 2).join('/');
         if (!repo || !rel) return new Response('Not Found', { status: 404 });
-        file = path.join(aiModels.modelDir(paths().launcher, repo), ...rel.split('/'));
+        file = safeJoin(aiModels.modelDir(paths().launcher, repo), rel.split('/'));
       } else if (host === 'ort') {
-        file = path.join(require('./ai-server').aiRuntimeDir(), 'ort', segs[0] || '');
+        file = safeJoin(require('./ai-server').aiRuntimeDir(), ['ort', segs[0] || '']);
       } else if (host === 'app') {
-        file = path.join(require('./ai-server').aiRuntimeDir(), ...segs);
+        file = safeJoin(require('./ai-server').aiRuntimeDir(), segs);
       } else {
         return new Response('Not Found', { status: 404 });
       }
+      if (!file) return new Response('Not Found', { status: 404 });
       if (!file || !exists(file)) return new Response('Not Found', { status: 404 });
       return net.fetch('file://' + file.replace(/\\/g, '/'));
     });

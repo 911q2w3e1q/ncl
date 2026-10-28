@@ -47,15 +47,19 @@ function listCrashReports(gameDir) {
 }
 
 function readTail(file, maxBytes) {
+  let fd = null;
   try {
     const st = fs.statSync(file);
-    const fd = fs.openSync(file, 'r');
+    fd = fs.openSync(file, 'r');
     const len = Math.min(st.size, maxBytes);
     const buf = Buffer.alloc(len);
     fs.readSync(fd, buf, 0, len, st.size - len);
-    fs.closeSync(fd);
     return buf.toString('utf8');
-  } catch { return ''; }
+  } catch {
+    return '';
+  } finally {
+    if (fd !== null) { try { fs.closeSync(fd); } catch {} }
+  }
 }
 
 function extractErrorLines(text) {
@@ -296,7 +300,8 @@ function parseLooseText(text) {
 
 async function analyzeCrash(cfgIn, ctx, localRunner) {
   const cfg = normalizeAiConfig(cfgIn);
-  const messages = buildPrompt(collectCrashContext(ctx), cfg.mode === 'local');
+  const crashCtx = collectCrashContext(ctx);
+  const messages = buildPrompt(crashCtx, cfg.mode === 'local');
 
   let content;
   if (cfg.mode === 'local') {
@@ -330,7 +335,7 @@ async function analyzeCrash(cfgIn, ctx, localRunner) {
       const loose = parseLooseText(content);
       if (loose) {
         
-        const rule = analyzeByRules(collectCrashContext(ctx));
+        const rule = analyzeByRules(crashCtx);
         const analysis = normalizeAnalysis({
           summary: rule.summary || loose.summary,
           confidence: rule.matched ? 'medium' : 'low',

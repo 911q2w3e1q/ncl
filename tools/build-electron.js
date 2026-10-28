@@ -68,17 +68,37 @@ function du(dir) {
 }
 
 function electronDist() {
-  
+  const version = require(path.join(ROOT, 'node_modules', 'electron', 'package.json')).version;
   const external = path.join(ROOT, 'build', 'electron-dists', `${PLATFORM}-${ARCH}`);
-  if (fs.existsSync(path.join(external, IS_WIN ? 'electron.exe' : 'electron'))) return external;
+  const externalBin = path.join(external, IS_WIN ? 'electron.exe' : 'electron');
+  const marker = path.join(external, '.electron-version');
+
+  if (fs.existsSync(externalBin)) {
+    const got = fs.existsSync(marker) ? fs.readFileSync(marker, 'utf8').trim() : '';
+    if (got === version) return external;
+    rmrf(external);
+  }
+
+  const zipName = `electron-v${version}-${PLATFORM}-${ARCH}.zip`;
+  const cached = path.join(ROOT, 'build', 'electron-dists', 'cache', zipName);
+  if (fs.existsSync(cached)) {
+    rmrf(external);
+    ensureDir(external);
+    execFileSync('unzip', ['-q', '-o', cached, '-d', external]);
+    if (fs.existsSync(externalBin)) {
+      fs.writeFileSync(marker, version);
+      return external;
+    }
+  }
+
   const dist = path.join(ROOT, 'node_modules', 'electron', 'dist');
   if (!fs.existsSync(dist)) {
     throw new Error(
       `未找到 ${PLATFORM}-${ARCH} 的 Electron 运行时。\n` +
       `请先下载：\n` +
-      `  mkdir -p build/electron-dists && cd build/electron-dists\n` +
-      `  curl -L -o electron.zip https://github.com/electron/electron/releases/download/v${require(path.join(ROOT, 'node_modules', 'electron', 'package.json')).version}/electron-v${require(path.join(ROOT, 'node_modules', 'electron', 'package.json')).version}-${PLATFORM}-${ARCH}.zip\n` +
-      `  unzip -q electron.zip -d ${PLATFORM}-${ARCH}`,
+      `  mkdir -p build/electron-dists/cache && cd build/electron-dists/cache\n` +
+      `  curl -L -o ${zipName} https://github.com/electron/electron/releases/download/v${version}/${zipName}\n` +
+      `  cd .. && unzip -q -o cache/${zipName} -d ${PLATFORM}-${ARCH}`,
     );
   }
   if (PLATFORM !== process.platform) {
