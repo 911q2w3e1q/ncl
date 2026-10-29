@@ -4,7 +4,7 @@ using System.Windows.Forms;
 
 namespace Ncl.Forms
 {
-    /// <summary>主窗口：顶栏导航 + 四个页面（游戏 / 下载中心 / Wiki / 设置）</summary>
+    /// <summary>主窗口：顶栏导航 + 五个页面（游戏 / 下载中心 / 联机 / Wiki / 设置）</summary>
     public class MainForm : Form
     {
         private Panel _navBar;
@@ -12,6 +12,7 @@ namespace Ncl.Forms
         private Button[] _navButtons;
         private GamePage _gamePage;
         private DownloadPage _downloadPage;
+        private OnlinePage _onlinePage;
         private WikiPage _wikiPage;
         private SettingsPage _settingsPage;
         private int _current = -1;
@@ -34,6 +35,7 @@ namespace Ncl.Forms
 
             _gamePage = new GamePage();
             _downloadPage = new DownloadPage();
+            _onlinePage = new OnlinePage();
             _wikiPage = new WikiPage();
             _settingsPage = new SettingsPage();
 
@@ -48,7 +50,7 @@ namespace Ncl.Forms
             brand.Location = new Point(18, 14);
             _navBar.Controls.Add(brand);
 
-            string[] names = { "游戏", "下载中心", "Wiki", "设置" };
+            string[] names = { "游戏", "下载中心", "联机", "Wiki", "设置" };
             _navButtons = new Button[names.Length];
             int x = 92;
             for (int i = 0; i < names.Length; i++)
@@ -88,8 +90,9 @@ namespace Ncl.Forms
             _content.Controls.Clear();
             Control page = _gamePage;
             if (index == 1) page = _downloadPage;
-            else if (index == 2) page = _wikiPage;
-            else if (index == 3) page = _settingsPage;
+            else if (index == 2) page = _onlinePage;
+            else if (index == 3) page = _wikiPage;
+            else if (index == 4) page = _settingsPage;
             page.Dock = DockStyle.Fill;
             _content.Controls.Add(page);
             for (int i = 0; i < _navButtons.Length; i++)

@@ -314,6 +314,17 @@
               </div>
             </div>
             <div class="set-card">
+              <div class="set-info"><div class="set-name">存档管理</div><div class="set-desc">查看当前游戏目录里的存档；切换过启动器或游戏目录后，可把别的启动器里的存档（含极限模式）一键搬过来</div></div>
+              <div class="set-ctrl set-ctrl-wide">
+                <div class="saves-toolbar">
+                  <span class="set-path" id="sp-saves-dir">—</span>
+                  <button class="btn-ghost btn-sm" id="sp-btn-saves-refresh">刷新</button>
+                  <button class="btn-ghost btn-sm" id="sp-btn-saves-scan">从其他启动器导入…</button>
+                </div>
+                <div class="saves-list" id="sp-saves-list"></div>
+              </div>
+            </div>
+            <div class="set-card">
               <div class="set-info"><div class="set-name">检查更新</div><div class="set-desc">查看是否有新版本的启动器</div></div>
               <div class="set-ctrl">
                 <button class="btn-ghost btn-sm" id="sp-btn-check-update">检查更新</button>
@@ -345,6 +356,28 @@
               <div class="set-info"><div class="set-name">本地模型</div><div class="set-desc">选一个内置小模型并下载到本地，之后分析完全离线运行，不消耗任何额度。内置的规则引擎会先给出确定性的崩溃结论，小模型输出作为补充意见</div></div>
               <div class="set-ctrl set-ctrl-wide">
                 <div class="ai-model-list" id="sp-ai-model-list"></div>
+              </div>
+            </div>
+            <div class="set-card">
+              <div class="set-info"><div class="set-name">游戏语言资源</div><div class="set-desc">游戏里的中文文本来自单独的语言文件（zh_cn.json）。从别的启动器复制来的版本常常缺这个文件，表现就是「进游戏全是英文」。点右边按钮可检测并补全</div></div>
+              <div class="set-ctrl set-ctrl-wide">
+                <div class="saves-toolbar">
+                  <span class="set-path" id="sp-lang-status">正在检测…</span>
+                  <button class="btn-ghost btn-sm" id="sp-btn-lang-check">检测</button>
+                  <button class="btn btn-sm" id="sp-btn-lang-repair">补全中文</button>
+                </div>
+              </div>
+            </div>
+            <div class="set-card" id="sp-ai-device-card" hidden>
+              <div class="set-info"><div class="set-name">推理设备</div><div class="set-desc">优先用显卡（WebGPU）跑模型；支持 NPU 的机器还能走「AI 计算单元」（WebNN）。选「自动」时优先显卡，没有显卡才退回 CPU</div></div>
+              <div class="set-ctrl set-ctrl-wide">
+                <div class="seg" id="sp-ai-device">
+                  <button class="seg-item" data-device="auto">自动</button>
+                  <button class="seg-item" data-device="webgpu">显卡</button>
+                  <button class="seg-item" data-device="webnn">AI 计算单元</button>
+                  <button class="seg-item" data-device="wasm">仅 CPU</button>
+                </div>
+                <div class="set-path" id="sp-ai-device-status">正在检测可用设备…</div>
               </div>
             </div>
             <div class="set-card" id="sp-ai-baseurl-card">
@@ -625,6 +658,7 @@
       <div class="modal-tabs">
         <button class="mtab active" data-atab="offline">离线账户</button>
         <button class="mtab" data-atab="littleskin">LittleSkin</button>
+        <button class="mtab" data-atab="password">账号密码</button>
         <button class="mtab" data-atab="microsoft">微软正版</button>
       </div>
       <div class="modal-body">
@@ -647,6 +681,20 @@
           </label>
           <p class="dim">登录后会按 LittleSkin 仪表盘角色卡片展示头像、皮肤模型与披风信息，并自动用于游戏内外置登录。</p>
           <button class="btn" id="btn-ys-login">登录 LittleSkin</button>
+        </div>
+        <div id="atab-password" class="atab-body" hidden>
+          <label class="field"><span class="field-label">账号（邮箱）</span>
+            <input type="text" id="pwd-user" placeholder="你拿到的账号邮箱" autocomplete="off" />
+          </label>
+          <label class="field"><span class="field-label">密码</span>
+            <input type="password" id="pwd-pass" placeholder="账号密码" autocomplete="off" />
+          </label>
+          <label class="field"><span class="field-label">皮肤站 API（可选，非微软账号时使用）</span>
+            <input type="text" id="pwd-api" value="https://littleskin.cn/api/yggdrasil" />
+          </label>
+          <p class="dim">直接用邮箱与密码登录。程序会先尝试皮肤站（Yggdrasil）验证；若不是皮肤站账号，则自动打开微软官方登录页并自动填入账号与密码，密码由你在微软页面中确认。密码不会写入本地配置文件。</p>
+          <button class="btn" id="btn-pwd-login">使用账号密码登录</button>
+          <div id="pwd-status" class="ms-device-status" hidden></div>
         </div>
         <div id="atab-microsoft" class="atab-body" hidden>
           <p class="dim">使用微软账号登录 Minecraft Java 版（账号需已购买游戏，或绑定含本游戏的 Xbox Game Pass）。采用官方设备码流程：启动器不接触你的密码，只需在浏览器里输入一个 8 位代码完成授权，可在手机 / 其他电脑上操作。</p>

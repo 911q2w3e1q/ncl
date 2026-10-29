@@ -8,7 +8,7 @@ using Ncl.Core;
 
 namespace Ncl.Forms
 {
-    /// <summary>账户管理弹窗：离线 / 外置登录(Yggdrasil) / 微软正版</summary>
+    /// <summary>账户管理弹窗：离线 / 外置登录(Yggdrasil) / 微软正版 / 微软账号密码</summary>
     public class AccountDialog : Form
     {
         private readonly bool _switchOnly;
@@ -17,6 +17,8 @@ namespace Ncl.Forms
         private TextBox _apiRootBox;
         private TextBox _userBox;
         private TextBox _passBox;
+        private TextBox _msMailBox;
+        private TextBox _msPassBox;
         private Label _status;
 
         public AccountDialog(bool switchOnly = false)
@@ -39,9 +41,11 @@ namespace Ncl.Forms
             var offline = new TabPage("离线登录") { BackColor = Theme.Bg };
             var ygg = new TabPage("外置登录（LittleSkin）") { BackColor = Theme.Bg };
             var ms = new TabPage("微软正版") { BackColor = Theme.Bg };
+            var msPwd = new TabPage("账号密码") { BackColor = Theme.Bg };
             tabs.TabPages.Add(offline);
             tabs.TabPages.Add(ygg);
             tabs.TabPages.Add(ms);
+            tabs.TabPages.Add(msPwd);
 
             /* 离线 */
             var l1 = Ui.MakeLabel("玩家名", 9, true);
@@ -103,6 +107,34 @@ namespace Ncl.Forms
             btnMs.Location = new Point(16, 122);
             btnMs.Click += async (s, e) => await LoginMicrosoft(codeBox);
             ms.Controls.Add(btnMs);
+
+            /* 微软账号密码 */
+            var l6 = Ui.MakeLabel("微软账号（邮箱）", 9, true);
+            l6.Location = new Point(16, 18);
+            msPwd.Controls.Add(l6);
+            _msMailBox = Ui.MakeInput();
+            _msMailBox.Location = new Point(16, 42);
+            _msMailBox.Width = 460;
+            msPwd.Controls.Add(_msMailBox);
+            var l7 = Ui.MakeLabel("密码", 9, true);
+            l7.Location = new Point(16, 74);
+            msPwd.Controls.Add(l7);
+            _msPassBox = Ui.MakeInput();
+            _msPassBox.Location = new Point(16, 98);
+            _msPassBox.Width = 460;
+            _msPassBox.UseSystemPasswordChar = true;
+            msPwd.Controls.Add(_msPassBox);
+            var btnMsPwd = Ui.MakeButton("使用账号密码登录", true, 150);
+            btnMsPwd.Location = new Point(16, 132);
+            btnMsPwd.Click += async (s, e) => await LoginMicrosoftPassword();
+            msPwd.Controls.Add(btnMsPwd);
+            var hintPwd = Ui.MakeLabel(
+                "密码仅在内存中使用，不会写入本地任何文件，登录成功后输入框立即清空。\n若账号启用了两步验证，请改用「微软正版」页的设备码授权。", 8, false, Theme.TextDim);
+            hintPwd.Location = new Point(16, 166);
+            hintPwd.AutoSize = false;
+            hintPwd.Width = 460;
+            hintPwd.Height = 34;
+            msPwd.Controls.Add(hintPwd);
 
             /* 已有账户列表 */
             var listLabel = Ui.MakeLabel("已有账户", 9, true);
@@ -258,6 +290,79 @@ namespace Ncl.Forms
                 LoadAccounts();
             }
             catch (Exception e) { codeBox.Text = "登录失败：" + e.Message; Ui.Toast(this, e.Message, true); }
+        }
+        private async Task LoginMicrosoftPassword()
+        {
+            string email = (_msMailBox.Text ?? "").Trim();
+            string password = _msPassBox.Text ?? "";
+            if (email.Length == 0) { Ui.Toast(this, "请填写微软账号（邮箱）", true); return; }
+            if (password.Length == 0) { Ui.Toast(this, "请填写密码", true); return; }
+
+            // 密码仅在内存中使用，用完立刻清空输入框
+            _msPassBox.Text = "";
+            _status.Text = "正在打开微软登录页…";
+
+            MsPasswordResult res = null;
+            try
+            {
+                await Task.Run(() => MsPasswordLogin.OpenEmbeddedLogin(
+                    email, password,
+                    (msg) => { try { BeginInvoke(new Action(() => _status.Text = msg)); } catch { } },
+                    (r) => { res = r; }
+                )).ConfigureAwait(true);
+            }
+            catch (Exception e)
+            {
+                _status.Text = "登录失败：" + e.Message;
+                Ui.Toast(this, e.Message, true);
+                return;
+            }
+
+            // 无论成功失败，内存里的密码字符串都不要留在局部变量里
+            password = null;
+
+            if (res == null || !res.Ok)
+            {
+                string err = res?.Error ?? "登录失败";
+                _status.Text = err;
+                Ui.Toast(this, err, true);
+                return;
+            }
+
+            try
+            {
+                _status.Text = "正在完成 Xbox Live 令牌交换…";
+                var info = await Auth.MsExchangeToken(res.AccessToken).ConfigureAwait(true);
+                var acc = new Account
+                {
+                    Id = Net.Uuid(),
+                    Type = AccountTypes.Microsoft,
+                    Name = info.Name,
+                    Uuid = info.Uuid,
+                    Xuid = info.Xuid,
+                    AccessToken = info.AccessToken,
+                    RefreshToken = res.RefreshToken,
+                    ExpiresAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + (long)res.ExpiresIn * 1000,
+                    SkinUrl = info.SkinUrl,
+                    CapeUrl = info.CapeUrl,
+                    Model = info.Model,
+                    LastLoginAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                };
+                var d = Accounts.Load();
+                d.Accounts.RemoveAll(a => a.Type == AccountTypes.Microsoft && a.Uuid == acc.Uuid);
+                d.Accounts.Add(acc);
+                d.SelectedId = acc.Id;
+                Accounts.Save(d);
+                _msMailBox.Text = "";
+                _status.Text = "登录成功";
+                Ui.Toast(this, "已登录 " + acc.Name);
+                LoadAccounts();
+            }
+            catch (Exception e)
+            {
+                _status.Text = "登录失败：" + e.Message;
+                Ui.Toast(this, "登录失败：" + e.Message, true);
+            }
         }
     }
 }

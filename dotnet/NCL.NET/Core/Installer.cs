@@ -69,7 +69,25 @@ namespace Ncl.Core
                     };
                     entry.Mirrors.Add(BmclMaven + "/" + p);
                     entry.Mirrors.Add("https://libraries.minecraft.net/" + p);
-                    entry.Mirrors.Add("https://maven.fabricmc.net/" + p);
+                    // 按 maven group 追加对应官方源：
+                    // org.quiltmc → quilt maven；net.fabricmc → fabric maven；
+                    // net.neoforged → neoforge maven；net.minecraftforge → forge maven
+                    string group = ((string)lib["name"] ?? "").Split(':')[0];
+                    switch (group)
+                    {
+                        case "org.quiltmc":
+                            entry.Mirrors.Add("https://maven.quiltmc.org/repository/release/" + p);
+                            break;
+                        case "net.fabricmc":
+                            entry.Mirrors.Add("https://maven.fabricmc.net/" + p);
+                            break;
+                        case "net.neoforged":
+                            entry.Mirrors.Add("https://maven.neoforged.net/releases/" + p);
+                            break;
+                        case "net.minecraftforge":
+                            entry.Mirrors.Add("https://maven.minecraftforge.net/" + p);
+                            break;
+                    }
                     outp.Add(entry);
                 }
             }

@@ -81,12 +81,29 @@ namespace Ncl.Core
         {
             var names = (vjson["libraries"] as JArray ?? new JArray())
                 .Select(l => (string)l["name"] ?? "").ToList();
-            if ((bool?)vjson["_fabric"] == true || names.Any(n => Regex.IsMatch(n, @"^net\.fabricmc:fabric-loader:")))
-                return "fabric";
+            // 识别顺序：先 Quilt → 再 NeoForge → 再 Forge → 最后 Fabric。
+            // 原因：Quilt 沿用了 Fabric 的 Knot 启动器，mainClass 形近，先判 Fabric 会误伤。
+            if (names.Any(n => Regex.IsMatch(n, @"^org\.quiltmc:quilt-loader:"))) return "quilt";
             if (names.Any(n => n.StartsWith("net.neoforged:"))) return "neoforge";
             if (names.Any(n => n.StartsWith("net.minecraftforge:"))) return "forge";
-            if (names.Any(n => n.StartsWith("org.quiltmc:quilt-loader:"))) return "quilt";
+            if ((bool?)vjson["_fabric"] == true || names.Any(n => Regex.IsMatch(n, @"^net\.fabricmc:fabric-loader:")))
+                return "fabric";
             return null;
+        }
+
+        /// <summary>判断是否真的是 Fabric profile（Forge / NeoForge / Quilt 的安装器产物同样带 inheritsFrom，不能只靠它判断）</summary>
+        public static bool IsFabricProfile(JObject j)
+        {
+            if (j == null) return false;
+            var names = (j["libraries"] as JArray ?? new JArray())
+                .Select(l => (string)l["name"] ?? "").ToList();
+            if (names.Any(n => n.StartsWith("org.quiltmc:"))) return false;
+            if (names.Any(n => n.StartsWith("net.neoforged:"))) return false;
+            if (names.Any(n => n.StartsWith("net.minecraftforge:"))) return false;
+            string mc = (string)j["mainClass"] ?? "";
+            if (Regex.IsMatch(mc, @"quiltmc|neoforged|minecraftforge", RegexOptions.IgnoreCase)) return false;
+            if (names.Any(n => Regex.IsMatch(n, @"^net\.fabricmc:fabric-loader:"))) return true;
+            return Regex.IsMatch(mc, @"^net\.fabricmc\.", RegexOptions.IgnoreCase);
         }
 
         /// <summary>加载器版本对应的 MC 版本（继承型 JSON 取 inheritsFrom，否则从 id 前缀解析）</summary>
@@ -167,19 +184,28 @@ namespace Ncl.Core
             var merged = (JObject)parent.DeepClone();
             merged.Merge(child, new JsonMergeSettings { MergeArrayHandling = MergeArrayHandling.Replace });
             merged["id"] = child["id"];
+            // libraries 按 name 去重：二次合并不能让同一个库出现两次
+            var libSeen = new HashSet<string>();
             var libs = new JArray();
             foreach (var l in parent["libraries"] as JArray ?? new JArray()) libs.Add(l);
             foreach (var l in child["libraries"] as JArray ?? new JArray()) libs.Add(l);
-            merged["libraries"] = libs;
+            var libsOut = new JArray();
+            foreach (var l in libs.OfType<JObject>())
+            {
+                string key = (string)l["name"] ?? l.ToString(Newtonsoft.Json.Formatting.None);
+                if (libSeen.Add(key)) libsOut.Add(l);
+            }
+            merged["libraries"] = libsOut;
 
+            // arguments.jvm/game 需按序列化后的项去重，否则二次合并会 11 → 27 → 38 无限累加
             var pj = parent["arguments"]?["jvm"] as JArray ?? new JArray();
             var cj = child["arguments"]?["jvm"] as JArray ?? new JArray();
             var pg = parent["arguments"]?["game"] as JArray ?? new JArray();
             var cg = child["arguments"]?["game"] as JArray ?? new JArray();
             merged["arguments"] = new JObject
             {
-                ["jvm"] = new JArray(pj.Concat(cj).Cast<object>().ToArray()),
-                ["game"] = cg.Count > 0 ? new JArray(pg.Concat(cg).Cast<object>().ToArray()) : pg
+                ["jvm"] = DedupArgs(pj.Concat(cj).Cast<object>()),
+                ["game"] = cg.Count > 0 ? DedupArgs(pg.Concat(cg).Cast<object>()) : pg
             };
             if (child["minecraftArguments"] != null) merged["minecraftArguments"] = child["minecraftArguments"];
             else if (parent["minecraftArguments"] != null) merged["minecraftArguments"] = parent["minecraftArguments"];
@@ -191,15 +217,37 @@ namespace Ncl.Core
             else if (parent["assets"] != null) merged["assets"] = parent["assets"];
             if (child["logging"] != null) merged["logging"] = child["logging"];
             else if (parent["logging"] != null) merged["logging"] = parent["logging"];
-            merged["_fabric"] = true;
+            // 必须保留 inheritsFrom：{...parent, ...child} 的合并语义会把它抹掉，
+            // 导致 McOfLoaderVersion 解析不出对应的 MC 版本号
+            if (child["inheritsFrom"] != null) merged["inheritsFrom"] = child["inheritsFrom"];
+            else if (parent["inheritsFrom"] != null) merged["inheritsFrom"] = parent["inheritsFrom"];
+            // 只有确实是 Fabric profile 时才打 _fabric 标，
+            // 否则 Forge / NeoForge / Quilt 的安装器产物会被误判成 Fabric
+            if ((bool?)child["_fabric"] == true || Rules.IsFabricProfile(child))
+                merged["_fabric"] = true;
+            else
+                merged.Remove("_fabric");
             return merged;
+        }
+
+        /// <summary>按序列化结果去重参数项</summary>
+        private static JArray DedupArgs(IEnumerable<object> items)
+        {
+            var seen = new HashSet<string>();
+            var outp = new JArray();
+            foreach (var it in items)
+            {
+                string key = it is JToken t ? t.ToString(Newtonsoft.Json.Formatting.None) : Convert.ToString(it);
+                if (seen.Add(key)) outp.Add(it);
+            }
+            return outp;
         }
     }
 
     public static class Consts
     {
         public const string LauncherName = "NCL";
-        public const string LauncherVersion = "1.5.0";
+        public const string LauncherVersion = "1.10.5";
         public const string ManifestUrl = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
         public const string JavaManifestUrl = "https://launchermeta.mojang.com/v1/products/java-runtime/2ec0cc96c44e5a76b9c8b7c39df7210883d12871/all.json";
         public const string GitHubRepo = "911q2w3e1q/ncl";
@@ -211,6 +259,8 @@ namespace Ncl.Core
         public const string NeoForgeMavenApi = "https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge";
         public const string QuiltMeta = "https://meta.quiltmc.org/v3";
         public const string QuiltMaven = "https://maven.quiltmc.org/repository/release";
+        /// <summary>Quilt 的 installer 版本号与 quilt-loader 版本号是两套独立版本号，坐标必须用前者</summary>
+        public const string QuiltInstallerVersion = "0.15.1";
         public const string ModrinthApi = "https://api.modrinth.com/v2";
         public const string BmclApi = "https://bmclapi2.bangbang93.com";
         public const string BmclMaven = "https://bmclapi2.bangbang93.com/maven";

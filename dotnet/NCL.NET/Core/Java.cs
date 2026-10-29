@@ -197,8 +197,11 @@ namespace Ncl.Core
         /// <summary>选一个能跑 installer 的 Java</summary>
         public static async Task<JavaInfo> PickInstallerJava(int needMajor, IProgress<InstallProgress> onProgress = null)
         {
-            var sys = DetectSystemJava();
-            if (sys != null && sys.Major >= needMajor && sys.Major <= 21) return sys;
+            var sys = await Task.Run(() => DetectSystemJava()).ConfigureAwait(false);
+            // 上限分档：老版本 MC 严格限制在 Java 21 以内（防止新 JDK 破坏旧加载器安装器），
+            // 只有 26.x（needMajor=25）才放宽到 needMajor+4，避免重复下载 Mojang 运行时。
+            int upper = needMajor > 21 ? needMajor + 4 : 21;
+            if (sys != null && sys.Major >= needMajor && sys.Major <= upper) return sys;
             string component = ComponentByMajor.ContainsKey(needMajor) ? ComponentByMajor[needMajor] : "java-runtime-gamma";
             return await InstallMojangRuntime(component, onProgress).ConfigureAwait(false);
         }
@@ -206,13 +209,20 @@ namespace Ncl.Core
         /// <summary>installer 运行所需 Java 主版本</summary>
         public static int InstallerJavaMajor(string mcVersion)
         {
-            var m = Regex.Match(mcVersion ?? "", @"^1\.(\d+)(?:\.(\d+))?$");
-            if (!m.Success) return 17;
-            int minor = int.Parse(m.Groups[1].Value);
-            if (minor >= 21) return 21;
-            if (minor >= 18) return 17;
-            if (minor == 17) return 16;
-            return 8;
+            var s = mcVersion ?? "";
+            var legacy = Regex.Match(s, @"^1\.(\d+)(?:\.(\d+))?$");
+            if (legacy.Success)
+            {
+                int minor = int.Parse(legacy.Groups[1].Value);
+                if (minor >= 21) return 21;
+                if (minor >= 18) return 17;
+                if (minor == 17) return 16;
+                return 8;
+            }
+            // Mojang 已把正式版切换到年份编号（26.x / 27.x …），全系要求 Java 25
+            var modern = Regex.Match(s, @"^(\d+)\.(\d+)");
+            if (modern.Success) return 25;
+            return 17;
         }
     }
 
