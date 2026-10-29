@@ -98,6 +98,25 @@ const fakeServer = net.createServer((s) => {
   const remoteBad = await ot.probeRemoteServer('127.0.0.1', junkPort);
   check('probeRemoteServer 排除非 MC', !!(remoteBad && remoteBad.ok === false), remoteBad);
 
+  const silent = net.createServer((c) => { c.end(); });
+  await new Promise((r) => silent.listen(0, '127.0.0.1', r));
+  const silentPort = silent.address().port;
+  const t0 = Date.now();
+  const silentProbe = await Promise.race([
+    ot.probeMinecraftPort(silentPort, 1200),
+    new Promise((r) => setTimeout(() => r('HUNG'), 6000)),
+  ]);
+  check('对端接受连接后立即关闭：探测必须及时返回而非挂死', silentProbe !== 'HUNG', silentProbe);
+  const t1 = Date.now();
+  const silentRemote = await Promise.race([
+    ot.probeRemoteServer('127.0.0.1', silentPort),
+    new Promise((r) => setTimeout(() => r('HUNG'), 6000)),
+  ]);
+  check('对端立即关闭：远程探测必须及时返回', silentRemote !== 'HUNG', silentRemote);
+  check('对端立即关闭：远程探测给出可读原因', !!(silentRemote && silentRemote.reason), silentRemote);
+  console.log(`  · 静默关闭端口探测耗时 ${Date.now() - t0}ms / ${Date.now() - t1}ms`);
+  silent.close();
+
   fakeServer.close();
   junk.close();
 

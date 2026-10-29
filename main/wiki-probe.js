@@ -1,6 +1,6 @@
 'use strict';
 
-const { BrowserWindow } = require('electron');
+const { BrowserWindow, shell } = require('electron');
 
 const ZH_WIKI = 'https://zh.minecraft.wiki';
 const EN_WIKI = 'https://minecraft.wiki';
@@ -9,16 +9,19 @@ const probeCache = new Map();
 
 const PROBE_TTL = 6 * 3600 * 1000;
 
-let probeWin = null;
-
-function ensureProbeWin() {
-  if (probeWin && !probeWin.isDestroyed()) return probeWin;
-  probeWin = new BrowserWindow({
+function createProbeWin() {
+  const win = new BrowserWindow({
     show: false,
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
-  probeWin.on('closed', () => { probeWin = null; });
-  return probeWin;
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  win.webContents.on('will-navigate', (event, url) => {
+    if (!/^https?:\/\//i.test(url)) event.preventDefault();
+  });
+  return win;
 }
 
 function zhPageName(versionId) {
@@ -30,9 +33,12 @@ function enPageName(versionId) {
 }
 
 async function pageExists(host, pageName) {
-  const win = ensureProbeWin();
+  const win = createProbeWin();
   const url = `${host}/api.php?action=query&titles=${encodeURIComponent(pageName)}&format=json&formatversion=2`;
-  const timer = new Promise((_, reject) => setTimeout(() => reject(new Error('探测超时')), 25000));
+  let to;
+  const timer = new Promise((_, reject) => {
+    to = setTimeout(() => reject(new Error('探测超时')), 25000);
+  });
   try {
     await Promise.race([
       (async () => {
@@ -60,8 +66,8 @@ async function pageExists(host, pageName) {
   } catch {
     return false;
   } finally {
-    if (timer && timer.clearTimeout) { 
- }
+    clearTimeout(to);
+    try { if (!win.isDestroyed()) win.destroy(); } catch {}
   }
 }
 
@@ -81,9 +87,6 @@ async function resolveWikiTarget(versionId) {
   return target;
 }
 
-function closeWikiProbe() {
-  if (probeWin && !probeWin.isDestroyed()) { try { probeWin.destroy(); } catch {} }
-  probeWin = null;
-}
+function closeWikiProbe() {}
 
 module.exports = { resolveWikiTarget, zhPageName, enPageName, closeWikiProbe, ZH_WIKI, EN_WIKI };

@@ -72,13 +72,23 @@ namespace Ncl.Core
             return indexed.Select(x => x.v).ToList();
         }
 
-        /// <summary>NeoForge 版本号前缀：1.20.4 → "20.4"，1.21 → "21.0"</summary>
+        /// <summary>NeoForge 版本号前缀：1.20.4 → "20.4"，1.21 → "21.0"，26.3 → "26.3.0"，26.1.2 → "26.1.2"</summary>
         public static string NeoForgePrefix(string mc)
         {
-            var m = Regex.Match(mc ?? "", @"^1\.(\d+)(?:\.(\d+))?$");
-            if (!m.Success) return null;
-            string minor = m.Groups[2].Success ? m.Groups[2].Value : "0";
-            return int.Parse(m.Groups[1].Value) + "." + minor;
+            var s = mc ?? "";
+            var legacy = Regex.Match(s, @"^1\.(\d+)(?:\.(\d+))?$");
+            if (legacy.Success)
+            {
+                string minor = legacy.Groups[2].Success ? legacy.Groups[2].Value : "0";
+                return int.Parse(legacy.Groups[1].Value) + "." + minor;
+            }
+            // 年份编号体系（26.x）：NeoForge 版本号 = <major>.<minor>.<patch>
+            // 26.3 → 26.3.0；26.1.2 → 26.1.2；26.2 → 26.2.0
+            var modern = Regex.Match(s, @"^(\d+)\.(\d+)(?:\.(\d+))?$");
+            if (!modern.Success) return null;
+            return modern.Groups[3].Success
+                ? modern.Groups[1].Value + "." + modern.Groups[2].Value + "." + int.Parse(modern.Groups[3].Value)
+                : modern.Groups[1].Value + "." + modern.Groups[2].Value + ".0";
         }
 
         public static async Task<JToken> FetchFirstJson(IEnumerable<string> urls)
@@ -189,8 +199,57 @@ namespace Ncl.Core
                 };
             }
             if (kind == "neoforge")
-                return new List<string> { "https://maven.neoforged.net/net/neoforged/neoforge/" + ver + "/neoforge-" + ver + "-installer.jar" };
-            return new List<string> { Consts.QuiltMaven + "/org/quiltmc/quilt-installer/" + ver + "/quilt-installer-" + ver + ".jar" };
+                return new List<string>
+                {
+                    Consts.BmclMaven + "/net/neoforged/neoforge/" + ver + "/neoforge-" + ver + "-installer.jar",
+                    "https://maven.neoforged.net/releases/net/neoforged/neoforge/" + ver + "/neoforge-" + ver + "-installer.jar"
+                };
+            // Quilt：installer 版本固定（loader 版本不能当 installer 版本用，否则必然 404）
+            string iv = Consts.QuiltInstallerVersion;
+            return new List<string>
+            {
+                Consts.QuiltMaven + "/org/quiltmc/quilt-installer/" + iv + "/quilt-installer-" + iv + ".jar",
+                Consts.BmclMaven + "/org/quiltmc/quilt-installer/" + iv + "/quilt-installer-" + iv + ".jar"
+            };
+        }
+
+        /// <summary>补一个最小可用的 launcher_profiles.json：Forge / NeoForge 官方安装器会检查它，缺失直接失败</summary>
+        public static void EnsureLauncherProfiles(string root)
+        {
+            try
+            {
+                string p = Path.Combine(root, "launcher_profiles.json");
+                if (File.Exists(p))
+                {
+                    try
+                    {
+                        var existing = JObject.Parse(File.ReadAllText(p));
+                        if (existing["profiles"] is JObject) return;
+                        existing["profiles"] = new JObject();
+                        existing["selectedProfile"] = existing["selectedProfile"] ?? JValue.CreateNull();
+                        existing["authentication"] = existing["authentication"] ?? new JObject
+                        {
+                            ["available_profiles"] = new JArray(),
+                            ["selected_profile"] = JValue.CreateNull()
+                        };
+                        File.WriteAllText(p, existing.ToString());
+                        return;
+                    }
+                    catch { }
+                }
+                var doc = new JObject
+                {
+                    ["profiles"] = new JObject(),
+                    ["selectedProfile"] = JValue.CreateNull(),
+                    ["authentication"] = new JObject
+                    {
+                        ["available_profiles"] = new JArray(),
+                        ["selected_profile"] = JValue.CreateNull()
+                    }
+                };
+                File.WriteAllText(p, doc.ToString());
+            }
+            catch { }
         }
 
         /// <summary>运行官方 installer：记录版本目录 → 识别新增 version id → 补跑安装补齐资源/Java</summary>
@@ -208,10 +267,53 @@ namespace Ncl.Core
             });
             Paths.EnsureDir(Paths.Versions);
             var before = new HashSet<string>(Directory.GetDirectories(Paths.Versions).Select(Path.GetFileName));
-            string[] args = kind == "quilt"
-                ? new[] { "-jar", jarPath, "install", "client", mc, loaderVer, "--install-dir", Paths.GameRoot }
-                : new[] { "-jar", jarPath, "--installClient", "--mc-dir", Paths.GameRoot };
-            var psi = new ProcessStartInfo(java.Path, string.Join(" ", args.Select(Quote)))
+
+            // Forge / NeoForge 安装器要求目标目录里有 launcher_profiles.json
+            EnsureLauncherProfiles(Paths.GameRoot);
+
+            // 自适应参数探测：不同加载器/版本的官方安装器参数完全不同，逐个尝试，
+            // 以「versions/ 目录是否新增了带 json 的子目录」为成功判据。
+            var argSets = kind == "quilt"
+                ? new[]
+                {
+                    new[] { "-jar", jarPath, "install", "client", mc, loaderVer, "--install-dir=" + Paths.GameRoot },
+                    new[] { "-jar", jarPath, "install", "client", mc, loaderVer, "--install-dir", Paths.GameRoot }
+                }
+                : new[]
+                {
+                    new[] { "-jar", jarPath, "--installClient", Paths.GameRoot },
+                    new[] { "-jar", jarPath, "--installClient", Paths.GameRoot, "--installDir", Paths.GameRoot },
+                    new[] { "-jar", jarPath, "--installClient", "--mc-dir", Paths.GameRoot }
+                };
+
+            string newId = null;
+            string lastOut = "";
+            foreach (var args in argSets)
+            {
+                lastOut = await RunInstallerProcess(java.Path, args).ConfigureAwait(false);
+                var created = Directory.GetDirectories(Paths.Versions)
+                    .Select(Path.GetFileName).Where(n => !before.Contains(n)).ToList();
+                newId = created.FirstOrDefault(v => File.Exists(Path.Combine(Paths.Versions, v, v + ".json")))
+                    ?? created.FirstOrDefault();
+                if (newId != null) break;
+                onProgress?.Report(new InstallProgress
+                {
+                    Stage = "loader",
+                    Message = "安装器未识别当前参数，换用其它参数重试…",
+                    Percent = 40
+                });
+            }
+            if (newId == null)
+                throw new Exception(Labels[kind] + " 安装器未生成新版本" +
+                    (string.IsNullOrEmpty(lastOut) ? "" : "：" + Tail(lastOut, 400)));
+            await Installer.InstallVersion(newId, onProgress).ConfigureAwait(false);
+            return newId;
+        }
+
+        /// <summary>执行安装器进程并收集输出</summary>
+        private static async Task<string> RunInstallerProcess(string javaPath, string[] args)
+        {
+            var psi = new ProcessStartInfo(javaPath, string.Join(" ", args.Select(Quote)))
             {
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
@@ -219,8 +321,7 @@ namespace Ncl.Core
                 CreateNoWindow = true,
                 WorkingDirectory = Paths.GameRoot
             };
-            psi.EnvironmentVariables["MINECRAFT_JAVA_DIR"] = java.Path;
-            string output;
+            psi.EnvironmentVariables["MINECRAFT_JAVA_DIR"] = javaPath;
             using (var proc = Process.Start(psi))
             {
                 var so = proc.StandardOutput.ReadToEndAsync();
@@ -228,19 +329,10 @@ namespace Ncl.Core
                 if (!proc.WaitForExit(15 * 60 * 1000))
                 {
                     try { proc.Kill(); } catch { }
-                    throw new Exception(Labels[kind] + " 安装器超时");
+                    throw new Exception("安装器超时");
                 }
-                output = so.Result + se.Result;
+                return so.Result + se.Result;
             }
-            var created = Directory.GetDirectories(Paths.Versions)
-                .Select(Path.GetFileName).Where(n => !before.Contains(n)).ToList();
-            string newId = created.FirstOrDefault(v => File.Exists(Path.Combine(Paths.Versions, v, v + ".json")))
-                ?? created.FirstOrDefault();
-            if (newId == null)
-                throw new Exception(Labels[kind] + " 安装器未生成新版本" +
-                    (string.IsNullOrEmpty(output) ? "" : "：" + Tail(output, 400)));
-            await Installer.InstallVersion(newId, onProgress).ConfigureAwait(false);
-            return newId;
         }
 
         private static string Quote(string s)
@@ -294,7 +386,10 @@ namespace Ncl.Core
         }
 
         /// <summary>安装 Fabric</summary>
-        public static async Task<string> InstallFabric(string mcVersion, IProgress<InstallProgress> onProgress = null)
+        /// <param name="withFabricApi">是否顺带安装 Fabric API（多数 Fabric 模组的必需依赖）</param>
+        /// <param name="fabricApiResult">Fabric API 安装结果（skipped 时不影响加载器本身已装成功）</param>
+        public static async Task<string> InstallFabric(string mcVersion, IProgress<InstallProgress> onProgress = null,
+            bool withFabricApi = true, FabricApiResult fabricApiResult = null)
         {
             string enc = Uri.EscapeDataString(mcVersion);
             var loaders = await FetchFirstJson(new[]
@@ -316,6 +411,26 @@ namespace Ncl.Core
             Paths.EnsureDir(vdir);
             Json.Save(Path.Combine(vdir, id + ".json"), profile);
             await Installer.InstallVersion(id, onProgress).ConfigureAwait(false);
+
+            // 顺带装 Fabric API：装不上不影响加载器本身已装成功
+            if (withFabricApi)
+            {
+                try
+                {
+                    var r = await FabricApi.Install(mcVersion, Paths.GameRoot, onProgress).ConfigureAwait(false);
+                    if (fabricApiResult != null)
+                    {
+                        fabricApiResult.Skipped = r.Skipped;
+                        fabricApiResult.Path = r.Path;
+                        fabricApiResult.Version = r.Version;
+                    }
+                }
+                catch (Exception e)
+                {
+                    if (fabricApiResult != null)
+                        fabricApiResult.Skipped = "Fabric API 安装失败：" + e.Message;
+                }
+            }
             return id;
         }
     }

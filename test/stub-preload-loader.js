@@ -12,7 +12,7 @@ const INSTALLED = [
 const state = {
   gameRoot: '/tmp/ncl-test',
   launcherDir: '/tmp/ncl-test/launcher',
-  launcherVersion: '1.9.0',
+  launcherVersion: '1.10.7',
   sysMemoryMB: 8192,
   accounts: [],
   selectedAccount: null,
@@ -30,6 +30,8 @@ const MANIFEST = {
   ],
 };
 
+const deletedLog = [];
+
 contextBridge.exposeInMainWorld('cube', {
   invoke(channel, ...args) {
     switch (channel) {
@@ -41,6 +43,16 @@ contextBridge.exposeInMainWorld('cube', {
         return Promise.resolve({ ok: true, versions: ['47.1.3', '47.2.0'] });
       case 'versions:select': return Promise.resolve(state);
       case 'versions:installLoader': return Promise.resolve({ ok: true, id: '1.20.1-forge-47.2.0' });
+      case 'versions:delete': {
+        const vid = args[0];
+        const idx = state.installed.findIndex((v) => v.id === vid);
+        if (idx < 0) return Promise.resolve({ ok: false, error: '版本不存在：' + vid });
+        state.installed.splice(idx, 1);
+        if (state.settings.selectedVersionId === vid) state.settings.selectedVersionId = null;
+        deletedLog.push(vid);
+        return Promise.resolve({ ok: true, deleted: vid, state });
+      }
+      case 'versions:deletedLog': return Promise.resolve(deletedLog.slice());
       default: return Promise.resolve({ ok: true });
     }
   },

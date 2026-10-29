@@ -333,5 +333,48 @@ namespace Ncl.Core
             _gameProc = null;
             return true;
         }
+
+        /// <summary>加入联机：把目标地址写进该版本的 serverAddress，启动游戏后由 quickPlay 自动进服</summary>
+        /// <returns>true 表示该版本支持 quickPlay 自动进服；false 表示需手动「多人游戏 → 添加服务器」</returns>
+        public static bool JoinServer(string host, int port, Action<string> onLog = null)
+        {
+            var settings = Settings.Load();
+            string vid = settings.SelectedVersionId;
+            if (string.IsNullOrEmpty(vid)) throw new Exception("请先在「游戏」页选择一个已安装的版本");
+            if (!Versions.ListInstalled().Any(v => v.Id == vid))
+                throw new Exception("选中的版本未安装：" + vid);
+
+            string addr = host + ":" + port;
+            settings.PerVersion = settings.PerVersion ?? new System.Collections.Generic.Dictionary<string, VersionSettings>();
+            if (!settings.PerVersion.ContainsKey(vid)) settings.PerVersion[vid] = new VersionSettings();
+            settings.PerVersion[vid].ServerAddress = addr;
+            settings.Save();
+
+            bool quickPlay = IsQuickPlaySupported(vid);
+            // LaunchGame 会阻塞直到游戏退出，放后台线程跑
+            Task.Run(() => LaunchGame(vid, onLog));
+            return quickPlay;
+        }
+
+        /// <summary>该版本是否支持 quickPlay 自动进服（1.20 及以上）</summary>
+        public static bool IsQuickPlaySupported(string versionId)
+        {
+            var vjson = Versions.ReadLocalVersionJson(versionId);
+            if (vjson == null) return false;
+            var args = vjson["arguments"]?["game"] as Newtonsoft.Json.Linq.JArray;
+            if (args == null) return false;
+            foreach (var a in args.OfType<Newtonsoft.Json.Linq.JObject>())
+            {
+                var rules = a["rules"] as Newtonsoft.Json.Linq.JArray;
+                if (rules == null) continue;
+                foreach (var r in rules.OfType<Newtonsoft.Json.Linq.JObject>())
+                {
+                    string feature = (string)r["features"];
+                    if (feature != null && feature.Contains("quickPlay")) return true;
+                }
+            }
+            // 老版本用 minecraftArguments，没有 quickPlay
+            return false;
+        }
     }
 }
