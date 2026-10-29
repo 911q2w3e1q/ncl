@@ -11,14 +11,17 @@ const AdmZip = require('adm-zip');
 const aiAnalyzer = require('./ai-analyzer');
 const aiFixer = require('./ai-fixer');
 const aiModels = require('./ai-models');
+const assets = require('./assets');
 const aiLocal = require('./ai-local');
 const aiServer = require('./ai-server');
 const fabricApi = require('./fabric-api');
 const wikiProbe = require('./wiki-probe');
 const onlineTunnel = require('./online-tunnel');
+const msLoginWindow = require('./ms-login-window');
+const saves = require('./saves');
 
 const LAUNCHER_NAME = 'NCL';
-const LAUNCHER_VERSION = '1.9.0';
+const LAUNCHER_VERSION = '1.10.6';
 const MANIFEST_URL = 'https://piston-meta.mojang.com/mc/game/version_manifest_v2.json';
 const JAVA_MANIFEST_URL = 'https://launchermeta.mojang.com/v1/products/java-runtime/2ec0cc96c44e5a76b9c8b7c39df7210883d12871/all.json';
 const GITHUB_REPO = '911q2w3e1q/ncl';
@@ -176,15 +179,17 @@ async function downloadFile(url, dest, opts = {}) {
   ensureDir(path.dirname(dest));
   let lastErr = null;
   for (let attempt = 1; attempt <= retries; attempt++) {
+    let timer = null;
     try {
       const ac = new AbortController();
-      const timer = setTimeout(() => ac.abort(), timeout);
+      timer = setTimeout(() => ac.abort(), timeout);
       const res = await fetch(url, { signal: ac.signal, redirect: 'follow' });
-      clearTimeout(timer);
       if (!res.ok) throw new Error(`HTTP ${res.status} ${url}`);
       const total = Number(res.headers.get('content-length') || 0);
       let loaded = 0;
-      let lastTick = Date.now();
+      const t0 = Date.now();
+      let lastTick = t0;
+      let lastLoaded = 0;
       const tmp = dest + '.part';
       const ws = fs.createWriteStream(tmp);
       const bodyStream = Readable.fromWeb(res.body);
@@ -192,10 +197,17 @@ async function downloadFile(url, dest, opts = {}) {
         bodyStream.on('data', (chunk) => {
           loaded += chunk.length;
           const now = Date.now();
-          if (onProgress && now - lastTick > 200) {
+          if (onProgress && now - lastTick >= 200) {
+            const speed = (loaded - lastLoaded) / Math.max(0.001, (now - lastTick) / 1000);
             lastTick = now;
-            const speed = loaded / Math.max(0.001, (now - (opts._t0 || now)) / 1000);
-            onProgress({ loaded, total, speed, file: path.basename(dest) });
+            lastLoaded = loaded;
+            onProgress({
+              loaded,
+              total,
+              speed,
+              percent: total ? Math.min(100, Math.round((loaded / total) * 100)) : 0,
+              file: path.basename(dest)
+            });
           }
         });
         bodyStream.on('error', reject);
@@ -212,6 +224,8 @@ async function downloadFile(url, dest, opts = {}) {
     } catch (e) {
       lastErr = e;
       if (attempt < retries) await sleep(800 * attempt);
+    } finally {
+      if (timer) clearTimeout(timer);
     }
   }
   throw new Error(`下载失败: ${url} -> ${lastErr && lastErr.message}`);
@@ -276,6 +290,9 @@ function extractZip(file, dest) {
     };
     child.on('message', (m) => finish(m.ok ? resolve : reject, m.ok ? undefined : new Error(m.error || '解压失败')));
     child.on('error', (e) => finish(reject, e));
+    child.on('exit', (code) => {
+      if (code !== 0) finish(reject, new Error(`解压进程异常退出，退出码 ${code}`));
+    });
     child.send({ file, dest });
   });
 }
@@ -744,12 +761,39 @@ async function localRunner(cfg, messages, maxTokens) {
     throw new Error(`本地模型「${def.label}」尚未下载完成，请先在设置里下载`);
   }
   const srv = await ensureAiServer();
+  const device = await detectAiDevice(cfg.aiDevice);
+  const variant = aiModels.pickVariant(def, device, !!(deviceInfo && deviceInfo.f16));
+  if (!aiModels.variantInstalled(paths().launcher, def, variant)) {
+    const installed = aiModels.installedVariants(paths().launcher, def);
+    if (installed.length) {
+      const use = installed[0];
+      const res = await aiLocal.requestGeneration({
+        messages,
+        modelId,
+        repo: def.repo,
+        maxTokens: maxTokens || 512,
+        temperature: cfg.temperature,
+        contextWindow: def.contextWindow || 8192,
+        device: 'wasm',
+        variant: use,
+        protocolName: 'ncl-ai',
+        baseUrl: srv.baseUrl,
+        getWin: () => win,
+      }, (p) => {
+        if (win) win.webContents.send('launcher://ai-local-progress', { modelId, stage: p.stage || 'load', percent: p.percent || 0 });
+      });
+      return res.text || '';
+    }
+  }
   const res = await aiLocal.requestGeneration({
     messages,
     modelId,
     repo: def.repo,
     maxTokens: maxTokens || 512,
     temperature: cfg.temperature,
+    contextWindow: def.contextWindow || 8192,
+    device: cfg.aiDevice || 'auto',
+    variant,
     protocolName: 'ncl-ai',
     baseUrl: srv.baseUrl,
     getWin: () => win,
@@ -757,6 +801,21 @@ async function localRunner(cfg, messages, maxTokens) {
     if (win) win.webContents.send('launcher://ai-local-progress', { modelId, stage: p.stage || 'load', percent: p.percent || 0 });
   });
   return res.text || '';
+}
+
+let deviceInfo = null;
+let deviceInfoPromise = null;
+
+async function detectAiDevice(preferred) {
+  const want = preferred || 'auto';
+  try {
+    const srv = await ensureAiServer();
+    const info = await aiLocal.probeDevice(srv.baseUrl, want);
+    deviceInfo = info;
+    return info.device || 'wasm';
+  } catch {
+    return 'wasm';
+  }
 }
 
 async function runCrashAnalysis(trigger, extra) {
@@ -785,7 +844,8 @@ async function runCrashAnalysis(trigger, extra) {
 }
 
 function versionSettings(settings, versionId) {
-  return { ...settings.global, ...(settings.perVersion[versionId] || {}) };
+  const s = settings || {};
+  return { ...(s.global || {}), ...((s.perVersion || {})[versionId] || {}) };
 }
 
 const COMPONENT_BY_MAJOR = { 8: 'jre-legacy', 16: 'java-runtime-alpha', 17: 'java-runtime-gamma', 21: 'java-runtime-delta', 25: 'java-runtime-epsilon' };
@@ -1050,8 +1110,15 @@ async function installVersion(versionId, onProgress, mirrorBase = null) {
   let libDone = 0;
   const nativesDir = path.join(vdir, 'natives');
   onProgress({ stage: 'libraries', message: `下载依赖库 (0/${libs.length})`, percent: 0, speed: 0, loaded: 0, total: libs.length });
+  const libRoot = path.resolve(P.libraries);
+  const safeLibPath = (rel) => {
+    const t = path.resolve(libRoot, String(rel || ''));
+    if (t !== libRoot && !t.startsWith(libRoot + path.sep)) return null;
+    return t;
+  };
   await mapLimit(libs, 8, async ({ lib, artifact, mirrors }) => {
-    const dest = path.join(P.libraries, artifact.path);
+    const dest = safeLibPath(artifact.path);
+    if (!dest) return;
     
     const libMirrors = b
       ? [`${b}/maven/${artifact.path}`, ...(mirrors || []).filter((u) => u !== artifact.url)]
@@ -1063,7 +1130,8 @@ async function installVersion(versionId, onProgress, mirrorBase = null) {
     if (lib.natives && lib.natives[osName()]) {
       const cls = lib.downloads.classifiers && lib.downloads.classifiers[lib.natives[osName()]];
       if (cls) {
-        const zipPath = path.join(P.libraries, cls.path);
+        const zipPath = safeLibPath(cls.path);
+        if (!zipPath) return;
         await downloadArtifact(zipPath, cls, [cls.url]);
         if (zipPath.endsWith('.zip')) {
           const tmp = path.join(P.libraries, 'natives-tmp', path.basename(zipPath, '.zip'));
@@ -1196,7 +1264,7 @@ const QUILT_META = 'https://meta.quiltmc.org/v3';
 const QUILT_MAVEN = 'https://maven.quiltmc.org/repository/release';
 
 const QUILT_INSTALLER_VER = '0.15.1';
-const LOADER_LABELS = { forge: 'Forge', neoforge: 'NeoForge', quilt: 'Quilt' };
+const LOADER_LABELS = { fabric: 'Fabric', forge: 'Forge', neoforge: 'NeoForge', quilt: 'Quilt' };
 
 function sortVersionsDesc(vers) {
   const key = (v) => {
@@ -1217,18 +1285,24 @@ function sortVersionsDesc(vers) {
 }
 
 function installerJavaMajor(mcVersion) {
-  const m = String(mcVersion).match(/^1\.(\d+)(?:\.(\d+))?$/);
-  if (!m) return 17;
-  const minor = parseInt(m[1], 10);
-  if (minor >= 21) return 21;
-  if (minor >= 18) return 17;
-  if (minor === 17) return 16;
-  return 8;
+  const s = String(mcVersion);
+  const legacy = s.match(/^1\.(\d+)(?:\.(\d+))?$/);
+  if (legacy) {
+    const minor = parseInt(legacy[1], 10);
+    if (minor >= 21) return 21;
+    if (minor >= 18) return 17;
+    if (minor === 17) return 16;
+    return 8;
+  }
+  const modern = s.match(/^(\d+)\.(\d+)/);
+  if (modern) return 25;
+  return 17;
 }
 
 async function pickInstallerJava(needMajor, onProgress) {
   const sys = await detectSystemJava();
-  if (sys && sys.major >= needMajor && sys.major <= 21) return { ...sys, source: 'system' };
+  const upper = needMajor > 21 ? needMajor + 4 : 21;
+  if (sys && sys.major >= needMajor && sys.major <= upper) return { ...sys, source: 'system' };
   const component = COMPONENT_BY_MAJOR[needMajor] || 'java-runtime-gamma';
   return await installMojangRuntime(component, onProgress);
 }
@@ -1253,9 +1327,14 @@ async function listForgeVersions(mc) {
 }
 
 function neoforgePrefix(mc) {
-  const m = String(mc).match(/^1\.(\d+)(?:\.(\d+))?$/);
-  if (!m) return null;
-  return `${parseInt(m[1], 10)}.${m[2] ? parseInt(m[2], 10) : 0}`;
+  const s = String(mc);
+  const legacy = s.match(/^1\.(\d+)(?:\.(\d+))?$/);
+  if (legacy) return `${parseInt(legacy[1], 10)}.${legacy[2] ? parseInt(legacy[2], 10) : 0}`;
+  const modern = s.match(/^(\d+)\.(\d+)(?:\.(\d+))?$/);
+  if (!modern) return null;
+  return modern[3] !== undefined
+    ? `${modern[1]}.${modern[2]}.${parseInt(modern[3], 10)}`
+    : `${modern[1]}.${modern[2]}.0`;
 }
 async function listNeoForgeAll() {
   try {
@@ -1372,6 +1451,7 @@ async function runLoaderInstaller(kind, jarPath, mc, loaderVer, onProgress) {
 
 async function installLoader(kind, mc, onProgress, wantVersion = '') {
   if (!LOADER_LABELS[kind]) throw new Error(`未知的模组加载器：${kind}`);
+  if (kind === 'fabric') throw new Error('Fabric 请使用独立的安装流程');
   const latest = {
     forge: async () => (await listForgeVersions(mc))[0],
     neoforge: async () => neoforgeForMC(mc, await listNeoForgeAll())[0],
@@ -1400,6 +1480,27 @@ const PLACEHOLDER_DOCS = {
   natives_directory: '', library_directory: '', classpath_separator: process.platform === 'win32' ? ';' : ':',
 };
 
+function splitArgs(str) {
+  const out = [];
+  let cur = '';
+  let quote = null;
+  for (const ch of String(str)) {
+    if (quote) {
+      if (ch === quote) quote = null;
+      else cur += ch;
+      continue;
+    }
+    if (ch === '"' || ch === "'") { quote = ch; continue; }
+    if (/\s/.test(ch)) {
+      if (cur) { out.push(cur); cur = ''; }
+      continue;
+    }
+    cur += ch;
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
 function safeMemoryMB(want) {
   const sysMB = Math.floor(os.totalmem() / 1024 / 1024);
   let mb = Number(want) > 0 ? Math.floor(Number(want)) : 2048;
@@ -1421,6 +1522,7 @@ function ensureOptionsTxt(gameDir) {
     }
     lines.push(`${key}:${value}`);
   };
+  setKey('lang', 'zh_cn');
   setKey('language', 'zh_cn');
   setKey('onboardAccessibility', 'false');
   try {
@@ -1442,7 +1544,10 @@ function buildLaunchCommand(versionId, account, settings) {
 
   
   const cp = [path.join(P.versions, versionId, `${versionId}.jar`)];
-  for (const { artifact } of applicableLibraries(vjson)) cp.push(path.join(P.libraries, artifact.path));
+  for (const { artifact } of applicableLibraries(vjson)) {
+    const p = path.resolve(P.libraries, String(artifact.path || ''));
+    if (p.startsWith(path.resolve(P.libraries) + path.sep)) cp.push(p);
+  }
   const classpath = cp.join(process.platform === 'win32' ? ';' : ':');
 
   const log4jFile = path.join(P.versions, versionId, 'log4j2.xml');
@@ -1469,6 +1574,10 @@ function buildLaunchCommand(versionId, account, settings) {
     resolution_width: String(vs.width || 854),
     resolution_height: String(vs.height || 480),
     quickPlayPath: '', quickPlaySingleplayer: '', quickPlayMultiplayer: server, quickPlayRealms: '',
+    lang: 'zh_cn',
+    user_properties: '{}',
+    game_assets: P.assets,
+    auth_session: `token:${account.accessToken || '0'}:${account.uuid || '0'}`,
   };
   const subst = (s) => String(s).replace(/\$\{(\w+)\}/g, (m, k) => (k in vars ? vars[k] : m));
 
@@ -1502,18 +1611,20 @@ function buildLaunchCommand(versionId, account, settings) {
       `-Dminecraft.api.profiles.host=${root}/api`,
     );
   }
-  if (vs.jvmArgs && vs.jvmArgs.trim()) jvmArgs.push(...vs.jvmArgs.trim().split(/\s+/));
+  if (vs.jvmArgs && vs.jvmArgs.trim()) jvmArgs.push(...splitArgs(vs.jvmArgs.trim()));
 
   
   const gameArgs = [];
   const gameFeatures = {
     is_demo_user: false,
     has_custom_resolution: !vs.fullscreen && !!(vs.width && vs.height),
-    has_quick_plays_support: !!server,
+    has_quick_plays_support: true,
     is_quick_play_singleplayer: false,
     is_quick_play_multiplayer: !!server,
     is_quick_play_realms: false,
   };
+  const hasQuickPlayArg = !!(vjson.arguments && vjson.arguments.game
+    && vjson.arguments.game.some((a) => typeof a !== 'string' && JSON.stringify(a.value || '').includes('quickPlayMultiplayer')));
   if (vjson.arguments && vjson.arguments.game) {
     for (const a of vjson.arguments.game) {
       if (typeof a === 'string') gameArgs.push(subst(a));
@@ -1523,10 +1634,22 @@ function buildLaunchCommand(versionId, account, settings) {
       }
     }
   } else if (vjson.minecraftArguments) {
-    for (const a of subst(vjson.minecraftArguments).split(/\s+/)) gameArgs.push(a);
+    for (const a of splitArgs(subst(vjson.minecraftArguments))) gameArgs.push(a);
   }
-  
-  if (!gameArgs.includes('--lang')) gameArgs.push('--lang', 'zh_cn');
+
+  if (server && !hasQuickPlayArg) {
+    const sep = server.lastIndexOf(':');
+    const host = sep > 0 ? server.slice(0, sep) : server;
+    const port = sep > 0 ? server.slice(sep + 1) : '25565';
+    if (port && /^[\d]{1,5}$/.test(port)) {
+      gameArgs.push('--server', host);
+      gameArgs.push('--port', port);
+    } else {
+      gameArgs.push('--server', server);
+    }
+  }
+
+  if (!gameArgs.includes('--lang') && vjson.id && /^1\.[0-7]/.test(vjson.id)) gameArgs.push('--lang', 'zh_cn');
 
   return {
     javaPath: vs.javaPath || null,
@@ -1540,78 +1663,93 @@ function buildLaunchCommand(versionId, account, settings) {
 
 let gameProc = null;
 let launching = false;
+let stopping = false;
 
-async function launchGame(versionId, onLog) {
+async function prepareLaunch(versionId, onLog) {
   if (launching) throw new Error('正在启动中，请稍候');
   if (gameProc) throw new Error('游戏已在运行');
   launching = true;
+  const settings = loadSettings();
+  const { accounts, selectedId } = loadAccounts();
+  const account = accounts.find((a) => a.id === selectedId);
+  if (!account) { launching = false; throw new Error('请先登录账户'); }
+  const vjson = readLocalVersionJSON(versionId);
+  if (!vjson) { launching = false; throw new Error(`版本 ${versionId} 未安装`); }
+  if (account.type === ACCOUNT_TYPES.YGGDRASIL) {
+    try { await yggdrasilRefresh(account); saveAccounts({ accounts, selectedId }); } catch {}
+  } else if (account.type === ACCOUNT_TYPES.MICROSOFT) {
+    try { await microsoftRefresh(account); saveAccounts({ accounts, selectedId }); } catch {}
+  }
+  const cmd = buildLaunchCommand(versionId, account, settings);
+  const vs = versionSettings(settings, versionId);
+  ensureOptionsTxt(cmd.gameDir);
+  await ensureLangAssets(versionId, vjson);
+  rememberGameContext(versionId, cmd.gameDir);
+  lastGameLog = '';
+  const java = await ensureJava(vjson, vs.javaPath, (p) => { if (win) win.webContents.send('launcher://progress', p); });
+  const finalArgs = [...cmd.jvmArgs, cmd.mainClass, ...cmd.gameArgs];
+  const env = { ...process.env };
+  if (process.platform === 'linux' && !env.LD_LIBRARY_PATH) env.LD_LIBRARY_PATH = cmd.nativesDir;
+  return { cmd, finalArgs, env, java, vjson };
+}
+
+async function ensureLangAssets(versionId, vjson) {
   try {
-    const settings = loadSettings();
-    const { accounts, selectedId } = loadAccounts();
-    const account = accounts.find((a) => a.id === selectedId);
-    if (!account) throw new Error('请先登录账户');
-    const vjson = readLocalVersionJSON(versionId);
-    if (!vjson) throw new Error(`版本 ${versionId} 未安装`);
-    if (account.type === ACCOUNT_TYPES.YGGDRASIL) {
-      try { await yggdrasilRefresh(account); saveAccounts({ accounts, selectedId }); } catch {}
-    } else if (account.type === ACCOUNT_TYPES.MICROSOFT) {
-      try { await microsoftRefresh(account); saveAccounts({ accounts, selectedId }); } catch {}
-    }
-    const cmd = buildLaunchCommand(versionId, account, settings);
-    const vs = versionSettings(settings, versionId);
-    
-    ensureOptionsTxt(cmd.gameDir);
-    
-    rememberGameContext(versionId, cmd.gameDir);
-    lastGameLog = '';
-    
-    const java = await ensureJava(vjson, vs.javaPath, (p) => { if (win) win.webContents.send('launcher://progress', p); });
-    const finalArgs = [...cmd.jvmArgs, cmd.mainClass, ...cmd.gameArgs];
-
-    const env = { ...process.env };
-    if (process.platform === 'linux' && !env.LD_LIBRARY_PATH) env.LD_LIBRARY_PATH = cmd.nativesDir;
-
-    gameProc = spawn(java.path, finalArgs, { cwd: cmd.gameDir, env, detached: false });
-    const proc = gameProc;
-    const send = (line) => {
-      try { onLog(line); } catch {}
-      
-      lastGameLog = (lastGameLog + line + '\n').slice(-200 * 1024);
-    };
-    const onData = (buf) => buf.toString('utf8').split(/\r?\n/).filter(Boolean).forEach(send);
-    proc.stdout.on('data', onData);
-    proc.stderr.on('data', onData);
-    return await new Promise((resolve, reject) => {
-      let settled = false;
-      
-      
-      proc.on('error', (err) => {
-        if (settled) return;
-        settled = true;
-        gameProc = null;
-        if (win) win.webContents.send('launcher://game-exit', { code: null, error: `无法启动游戏进程：${err.message}` });
-        reject(new Error(`无法启动游戏进程：${err.message}`));
-      });
-      proc.on('exit', (code, signal) => {
-        if (settled) return;
-        settled = true;
-        gameProc = null;
-        
-        const crashed = (code !== 0 && code !== null) || !!signal;
-        if (crashed) {
-          const cfg = getAiConfig();
-          if (cfg.enabled && cfg.autoAnalyze) {
-            
-            runCrashAnalysis('auto', { exitCode: code, signal }).catch(() => { 
- });
-          } else if (win) {
-            
-            win.webContents.send('launcher://game-crashed', { code, signal, autoAnalyze: false });
-          }
-        }
-        resolve({ code, signal });
-      });
+    const res = assets.check(paths(), vjson, 'zh_cn');
+    if (res.reason === 'no-index') return false;
+    if (res.targetInstalled) return false;
+    if (win) win.webContents.send('launcher://log', { line: '检测到缺少中文语言文件，正在自动补全…' });
+    await assets.repair(paths(), vjson, 'zh_cn', (p) => {
+      if (win) win.webContents.send('launcher://assets-progress', { versionId, ...p });
     });
+    if (win) win.webContents.send('launcher://log', { line: '中文语言资源已补全' });
+    return true;
+  } catch (e) {
+    if (win) win.webContents.send('launcher://log', { line: `中文语言资源补全失败：${e.message}（游戏将以英文显示）` });
+    return false;
+  }
+}
+
+function watchGameExit(proc, onLog) {
+  const send = (line) => {
+    try { onLog(line); } catch {}
+    lastGameLog = (lastGameLog + line + '\n').slice(-200 * 1024);
+  };
+  const onData = (buf) => buf.toString('utf8').split(/\r?\n/).filter(Boolean).forEach(send);
+  proc.stdout.on('data', onData);
+  proc.stderr.on('data', onData);
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    proc.on('error', (err) => {
+      if (settled) return;
+      settled = true;
+      gameProc = null;
+      reject(new Error(`无法启动游戏进程：${err.message}`));
+    });
+    proc.on('exit', (code, signal) => {
+      if (settled) return;
+      settled = true;
+      gameProc = null;
+      const crashed = !stopping && ((code !== 0 && code !== null) || !!signal);
+      if (crashed) {
+        const cfg = getAiConfig();
+        if (cfg.enabled && cfg.autoAnalyze) {
+          runCrashAnalysis('auto', { exitCode: code, signal }).catch(() => {});
+        } else if (win) {
+          win.webContents.send('launcher://game-crashed', { code, signal, autoAnalyze: false });
+        }
+      }
+      resolve({ code, signal });
+    });
+  });
+}
+
+async function launchGame(versionId, onLog) {
+  const prep = await prepareLaunch(versionId, onLog);
+  try {
+    const proc = spawn(prep.java.path, prep.finalArgs, { cwd: prep.cmd.gameDir, env: prep.env, detached: false });
+    gameProc = proc;
+    return await watchGameExit(proc, onLog);
   } finally {
     launching = false;
   }
@@ -1619,8 +1757,10 @@ async function launchGame(versionId, onLog) {
 
 function stopGame() {
   if (!gameProc) return false;
+  stopping = true;
   try { gameProc.kill(); } catch {}
   gameProc = null;
+  setTimeout(() => { stopping = false; }, 3000);
   return true;
 }
 
@@ -1661,6 +1801,10 @@ function createWindow() {
   const modal = process.env.CUBE_MODAL ? `&modal=${encodeURIComponent(process.env.CUBE_MODAL)}` : '';
   const q = page ? `?page=${encodeURIComponent(page)}&dlhover=1${cat ? `&dlcat=${encodeURIComponent(cat)}` : ''}${src ? `&dlsrc=${encodeURIComponent(src)}` : ''}${scat ? `&scat=${encodeURIComponent(scat)}` : ''}${drop}${droptype}${wikiq}${wikatb}${wikiv}${wikidetail}${modal}` : `${drop}${droptype}${wikiq}${wikatb}${wikiv}${wikidetail}${modal}`.replace(/^&/, '?');
   const indexUrl = pathToFileURL(path.join(__dirname, '..', 'renderer', 'index.html')).href + q;
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+    return { action: 'deny' };
+  });
   win.loadURL(indexUrl);
   
   if (process.env.CUBE_SCREENSHOT) {
@@ -1674,7 +1818,28 @@ function createWindow() {
       }, delay);
     });
   }
-  win.on('closed', () => { win = null; });
+  // 主窗口关闭时的收尾。
+  //
+  // 这里必须主动清理，不能只依赖 app.on('window-all-closed')：
+  //   ai-worker 是一个**隐藏窗口**，它还活着 → window-all-closed 不会触发
+  //   → app.quit() 从没被调用 → before-quit / will-quit 的清理全都没跑
+  //   → HTTP server 的 keep-alive 连接 + worker 渲染进程让进程永远挂着
+  //   → 任务栏看起来关了，后台还在跑，单实例锁被占着，再次启动就打不开
+  win.on('closed', () => {
+    win = null;
+    try { aiLocal.disposeWorker(); } catch {}
+    try { if (aiServerInstance) aiServerInstance.close(); } catch {}
+    try { onlineTunnelInstance.stop(); } catch {}
+    try { msLoginWindow && msLoginWindow.closeSession && msLoginWindow.closeSession(); } catch {}
+    // 主动退出：不能等 window-all-closed（worker 窗口还在，永远等不到）
+    try { app.quit(); } catch {}
+    // 兜底：万一还有句柄残留（keep-alive socket / 未 unref 的定时器 / 子进程），
+    // 1.5 秒后强制结束进程，保证「关了就真的没了」
+    const guard = setTimeout(() => {
+      try { process.exit(0); } catch {}
+    }, 1500);
+    if (guard.unref) guard.unref();
+  });
 }
 
 const MODRINTH_API = 'https://api.modrinth.com/v2';
@@ -1839,8 +2004,14 @@ async function installModpack(payload, onProgress) {
     const files = index.files || [];
     let done = 0;
     onProgress({ stage: 'files', message: `下载整合包文件 (0/${files.length})`, percent: 0, speed: 0 });
+    const gameRoot = path.resolve(gameDir);
     await mapLimit(files, 6, async (f) => {
-      const dest = path.join(gameDir, f.path);
+      const rel = String((f && f.path) || '');
+      const dest = path.resolve(gameRoot, rel);
+      if (!rel || (dest !== gameRoot && !dest.startsWith(gameRoot + path.sep))) {
+        done++;
+        return;
+      }
       done++;
       if (exists(dest)) return;
       const url = (f.downloads || [])[0];
@@ -2086,7 +2257,7 @@ async function updaterApply() {
   saveSettings(s2);
 
   const child = kind === 'bat'
-    ? spawn('cmd.exe', ['/c', scriptPath], { detached: true, stdio: 'ignore', windowsVerbatimArguments: true })
+    ? spawn('cmd.exe', ['/c', `"${scriptPath}"`], { detached: true, stdio: 'ignore', windowsVerbatimArguments: true })
     : spawn('/bin/bash', [scriptPath], { detached: true, stdio: 'ignore' });
   child.unref();
   app.quit();
@@ -2150,8 +2321,8 @@ function getState() {
     launcherDir: LAUNCHER_DIR,
     launcherVersion: LAUNCHER_VERSION,
     sysMemoryMB: Math.floor(os.totalmem() / 1024 / 1024),
-    accounts: accounts.map((a) => ({ ...a, accessToken: undefined })),
-    selectedAccount: account ? { ...account, accessToken: undefined } : null,
+    accounts: accounts.map((a) => ({ ...a, accessToken: undefined, refreshToken: undefined })),
+    selectedAccount: account ? { ...account, accessToken: undefined, refreshToken: undefined } : null,
     settings,
     installed: listInstalled(),
     running: !!gameProc,
@@ -2210,6 +2381,70 @@ function registerIPC() {
     const acc = d.accounts.find((a) => a.id === id);
     if (acc) { await refreshAccountTextures(acc); saveAccounts(d); }
     return getState();
+  });
+
+  ipcMain.handle('account:loginMicrosoftPassword', async (_, payload) => {
+    const email = String((payload && payload.email) || '').trim();
+    const password = String((payload && payload.password) || '');
+    const apiRoot = String((payload && payload.apiRoot) || '').trim();
+    if (!email) return { ok: false, error: '请输入账号（邮箱）' };
+    if (!password) return { ok: false, error: '请输入密码' };
+
+    const yggApi = apiRoot || 'https://littleskin.cn/api/yggdrasil';
+    let yggErr = null;
+    if (/^https?:\/\//.test(yggApi)) {
+      try {
+        const acc = await yggdrasilLogin({ apiRoot: yggApi.replace(/\/+$/, ''), username: email, password });
+        const d = loadAccounts();
+        d.accounts = d.accounts.filter((a) => !(a.type === ACCOUNT_TYPES.YGGDRASIL && a.uuid === acc.uuid));
+        d.accounts.push(acc); d.selectedId = acc.id;
+        saveAccounts(d);
+        return { ok: true, channel: 'yggdrasil', account: { ...acc, accessToken: undefined } };
+      } catch (e) {
+        yggErr = e.message || String(e);
+      }
+    }
+
+    try {
+      const token = await new Promise((resolve, reject) => {
+        msLoginWindow.openEmbeddedLogin({
+          email, password,
+          parent: win,
+          onStatus: (s) => {
+            if (!win) return;
+            if (s.phase === 'error') reject(new Error(s.error));
+            else if (s.phase === 'token') resolve(s.token);
+            else win.webContents.send('launcher://ms-password-status', s);
+          },
+        }).catch(reject);
+      });
+      const info = await msExchangeToken(token.access_token);
+      const acc = {
+        id: crypto.randomUUID(),
+        type: ACCOUNT_TYPES.MICROSOFT,
+        name: info.name,
+        uuid: info.uuid,
+        xuid: info.xuid,
+        accessToken: info.accessToken,
+        refreshToken: token.refresh_token || '',
+        expiresAt: Date.now() + Number(token.expires_in || 86400) * 1000,
+        skinUrl: info.skinUrl,
+        capeUrl: info.capeUrl,
+        model: info.model,
+        lastLoginAt: Date.now(),
+      };
+      const d = loadAccounts();
+      d.accounts = d.accounts.filter((a) => !(a.type === ACCOUNT_TYPES.MICROSOFT && a.uuid === acc.uuid));
+      d.accounts.push(acc); d.selectedId = acc.id;
+      saveAccounts(d);
+      return { ok: true, channel: 'microsoft', account: { ...acc, accessToken: undefined, refreshToken: undefined } };
+    } catch (e) {
+      const msg = e.message || String(e);
+      const hint = /不是有效的微软账号|不是微软/.test(msg)
+        ? '该账号在皮肤站与微软均未通过验证，请确认邮箱与密码是否正确'
+        : (/用户名或密码错误|密码错误|Incorrect username/.test(yggErr || '') ? '该账号在皮肤站验证失败（密码错误），已改用微软登录' : '');
+      return { ok: false, error: msg, hint, yggError: yggErr || '' };
+    }
   });
 
   ipcMain.handle('account:loginMicrosoft', async () => {
@@ -2343,17 +2578,41 @@ function registerIPC() {
   });
 
   ipcMain.handle('versions:delete', (_, id) => {
-    fs.rmSync(path.join(paths().versions, id), { recursive: true, force: true });
+    const vid = String(id || '').trim();
+    if (!vid) return { ok: false, error: '未指定版本' };
+    const vroot = path.resolve(paths().versions);
+    const vdir = path.resolve(vroot, vid);
+    // 路径穿越防护：目标必须严格位于 versions/ 之内
+    if (!vdir.startsWith(vroot + path.sep) || vdir === vroot) {
+      return { ok: false, error: '非法的版本路径' };
+    }
+    if (!fs.existsSync(vdir)) return { ok: false, error: '版本不存在：' + vid };
+    try {
+      fs.rmSync(vdir, { recursive: true, force: true });
+    } catch (e) {
+      return { ok: false, error: '删除失败：' + (e && e.message ? e.message : String(e)) };
+    }
     const s = loadSettings();
-    if (s.selectedVersionId === id) s.selectedVersionId = null;
-    saveSettings(s);
-    return getState();
+    if (s.selectedVersionId === vid) s.selectedVersionId = null;
+    // 清理该版本的独立设置残留
+    if (s.perVersion && s.perVersion[vid]) {
+      delete s.perVersion[vid];
+      saveSettings(s);
+    } else {
+      saveSettings(s);
+    }
+    return { ok: true, deleted: vid, state: getState() };
   });
 
   ipcMain.handle('settings:save', (_, patch) => {
     const s = loadSettings();
     if (patch.global) s.global = { ...s.global, ...patch.global };
-    if (patch.perVersion) s.perVersion = { ...s.perVersion, ...patch.perVersion };
+    if (patch.perVersion) {
+      s.perVersion = s.perVersion || {};
+      for (const [vid, cfg] of Object.entries(patch.perVersion)) {
+        s.perVersion[vid] = { ...(s.perVersion[vid] || {}), ...(cfg || {}) };
+      }
+    }
     if ('selectedVersionId' in patch) s.selectedVersionId = patch.selectedVersionId;
     saveSettings(s);
     return getState();
@@ -2431,21 +2690,28 @@ function registerIPC() {
   
 
   ipcMain.handle('online:joinServer', async (_, payload) => {
+    let prep = null;
     try {
       const parsed = onlineTunnel.parseServerAddress(payload && payload.address);
       if (!parsed) return { ok: false, error: '地址格式不对，应为 host:port' };
       const versionId = (payload && payload.versionId) || loadSettings().selectedVersionId;
       if (!versionId) return { ok: false, error: '请先选择游戏版本' };
-      
+
       const settings = loadSettings();
       settings.perVersion = settings.perVersion || {};
       settings.perVersion[versionId] = { ...(settings.perVersion[versionId] || {}), serverAddress: parsed.address };
       saveSettings(settings);
-      const promise = launchGame(versionId, (line) => { if (win) win.webContents.send('launcher://game-log', line); });
-      promise.then(({ code, signal }) => { if (win) win.webContents.send('launcher://game-exit', { code, signal }); });
-      promise.catch((e) => { if (win) win.webContents.send('launcher://game-exit', { code: null, error: e.message }); });
+
+      prep = await prepareLaunch(versionId, (line) => { if (win) win.webContents.send('launcher://game-log', line); });
+      const proc = spawn(prep.java.path, prep.finalArgs, { cwd: prep.cmd.gameDir, env: prep.env, detached: false });
+      gameProc = proc;
+      watchGameExit(proc, (line) => { if (win) win.webContents.send('launcher://game-log', line); })
+        .then(({ code, signal }) => { if (win) win.webContents.send('launcher://game-exit', { code, signal }); })
+        .catch((e) => { if (win) win.webContents.send('launcher://game-exit', { code: null, error: e.message }); })
+        .finally(() => { launching = false; });
       return { ok: true, address: parsed.address, versionId };
     } catch (e) {
+      launching = false;
       return { ok: false, error: e.message };
     }
   });
@@ -2469,6 +2735,7 @@ function registerIPC() {
   
 
   ipcMain.on('ai:local-response', (_e, payload) => aiLocal.onWorkerResponse(payload));
+  ipcMain.on('ai:device-info', (_e, payload) => aiLocal.onDeviceInfo(payload));
   ipcMain.on('ai:local-progress', (_e, payload) => aiLocal.onWorkerProgress(payload));
 
   ipcMain.handle('ai:getConfig', () => {
@@ -2521,12 +2788,42 @@ function registerIPC() {
   ipcMain.handle('ai:localDownload', async (_, payload) => {
     const modelId = (payload && payload.modelId) || '';
     try {
+      const wanted = payload && Array.isArray(payload.variants) && payload.variants.length
+        ? payload.variants
+        : null;
+      const device = (payload && payload.device) || 'auto';
+      const resolved = wanted || null;
       const res = await aiModels.downloadModel(paths().launcher, modelId, (p) => {
         if (win) win.webContents.send('launcher://ai-local-progress', { modelId, ...p });
-      });
+      }, { variants: resolved, device, f16: !!(deviceInfo && deviceInfo.f16) });
       return { ok: true, ...res };
     } catch (e) {
       return { ok: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('ai:deviceInfo', async (_, payload) => {
+    try {
+      const preferred = (payload && payload.device) || getAiConfig().aiDevice || 'auto';
+      const device = await detectAiDevice(preferred);
+      const def = aiModels.getModelDef(getAiConfig().localModelId);
+      const variant = def ? aiModels.pickVariant(def, device, !!(deviceInfo && deviceInfo.f16)) : 'q4';
+      return {
+        ok: true,
+        device,
+        variant,
+        adapterInfo: (deviceInfo && deviceInfo.adapterInfo) || null,
+        f16: !!(deviceInfo && deviceInfo.f16),
+        hasWebGPU: !!(deviceInfo && deviceInfo.hasWebGPU),
+        hasWebNN: !!(deviceInfo && deviceInfo.hasWebNN),
+        webnnReason: (deviceInfo && deviceInfo.webnnReason) || '',
+        gpuReason: (deviceInfo && deviceInfo.gpuReason) || '',
+        crossOriginIsolated: !!(deviceInfo && deviceInfo.crossOriginIsolated),
+        hardwareConcurrency: (deviceInfo && deviceInfo.hardwareConcurrency) || 0,
+        variantInstalled: def ? aiModels.variantInstalled(paths().launcher, def, variant) : false,
+      };
+    } catch (e) {
+      return { ok: false, error: e.message, device: 'wasm' };
     }
   });
 
@@ -2551,7 +2848,12 @@ function registerIPC() {
   ipcMain.handle('ai:analyze', async (_, payload) => {
     try {
       const result = await runCrashAnalysis((payload && payload.trigger) || 'manual', payload || {});
-      return { ok: result.ok, error: result.error, analysis: result.analysis };
+      return {
+        ok: result.ok,
+        error: result.error,
+        analysis: result.analysis,
+        versionId: (lastGameContext && lastGameContext.versionId) || loadSettings().selectedVersionId || ''
+      };
     } catch (e) {
       return { ok: false, error: e.message };
     }
@@ -2646,10 +2948,22 @@ function registerIPC() {
       ensureDir(newRoot);
       GAME_ROOT = newRoot;
       for (const p of Object.values(paths())) ensureDir(p);
+      // 把旧目录里的服务器列表等游戏目录级文件复制过来。
+      // 换目录后 servers.dat 不跟着走的话，游戏里的多人服务器列表就是空的。
+      const carried = [];
+      for (const { file, label } of saves.EXTRA_GAME_FILES) {
+        try {
+          const from = path.join(prev, file);
+          const to = path.join(GAME_ROOT, file);
+          if (!exists(from) || exists(to)) continue;
+          fs.copyFileSync(from, to);
+          carried.push(label);
+        } catch { }
+      }
       const s = loadSettings();
       s.global = { ...(s.global || {}), gameRoot: newRoot, gameRootPrev: prev };
       saveSettings(s);
-      return { ok: true, state: getState() };
+      return { ok: true, state: getState(), carried };
     } catch (e) { return { ok: false, error: e.message }; }
   });
   ipcMain.handle('launcher:migrateGameRoot', async () => {
@@ -2664,7 +2978,99 @@ function registerIPC() {
     } catch (e) { return { ok: false, error: e.message }; }
   });
 
+  ipcMain.handle('saves:list', async (_, payload) => {
+    try {
+      const gameDir = (payload && payload.gameDir) || paths().root;
+      const worlds = saves.listWorlds(gameDir);
+      return { ok: true, gameDir, savesDir: path.join(gameDir, 'saves'), worlds };
+    } catch (e) { return { ok: false, error: e.message }; }
+  });
+
+  ipcMain.handle('saves:scanOtherLaunchers', async () => {
+    const candidates = [];
+    const home = os.homedir();
+    const push = (p, label) => { if (p && exists(p)) candidates.push({ path: p, label }); };
+    push(path.join(home, '.minecraft'), '默认 .minecraft');
+    push(path.join(home, 'PCL', '.minecraft'), 'PCL');
+    push(path.join(home, 'PCL2', '.minecraft'), 'PCL2');
+    push(path.join(home, 'HMCL'), 'HMCL');
+    push(path.join(home, 'HMCL-3.6'), 'HMCL');
+    push(path.join(home, '.HMCL'), 'HMCL');
+    push(path.join(home, 'Documents', 'HMCL'), 'HMCL 文档目录');
+    push(path.join(home, 'Desktop', '.minecraft'), '桌面 .minecraft');
+    if (process.platform === 'win32') {
+      const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+      push(path.join(appData, '.minecraft'), 'AppData .minecraft');
+      push(path.join(appData, 'PCL'), 'PCL');
+      push(path.join(appData, '.hmcl'), 'HMCL');
+    }
+    const out = [];
+    for (const c of candidates) {
+      const savesDir = path.join(c.path, 'saves');
+      let worlds = [];
+      try { worlds = saves.listWorlds(c.path); } catch {}
+      out.push({ ...c, savesDir, exists: exists(savesDir), worldCount: worlds.length, worlds });
+    }
+    return { ok: true, candidates: out };
+  });
+
+  ipcMain.handle('saves:import', async (_, payload) => {
+    try {
+      const src = String((payload && payload.srcRoot) || '').trim();
+      const dest = String((payload && payload.destRoot) || '').trim();
+      if (!src || !exists(src)) return { ok: false, error: '来源目录不存在' };
+      if (!dest) return { ok: false, error: '目标目录无效' };
+      const names = Array.isArray(payload && payload.names) ? payload.names : null;
+      const r = saves.importWorlds(src, dest, names);
+      return { ok: true, ...r, worlds: saves.listWorlds(dest) };
+    } catch (e) { return { ok: false, error: e.message }; }
+  });
+
+  ipcMain.handle('saves:listServers', async (_, payload) => {
+    try {
+      const gameDir = (payload && payload.gameDir) || paths().root;
+      return { ok: true, gameDir, ...saves.listServers(gameDir) };
+    } catch (e) { return { ok: false, error: e.message }; }
+  });
+
+  ipcMain.handle('saves:pickOtherRoot', async () => {
+    const r = await dialog.showOpenDialog(win, { title: '选择包含 saves 的游戏目录', buttonLabel: '选择', properties: ['openDirectory'] });
+    if (r.canceled || !r.filePaths[0]) return null;
+    return r.filePaths[0];
+  });
+
   
+
+
+  ipcMain.handle('assets:check', async (_, payload) => {
+    try {
+      const versionId = (payload && payload.versionId) || loadSettings().selectedVersionId;
+      if (!versionId) return { ok: false, error: '请先选择游戏版本' };
+      const vjson = readLocalVersionJSON(versionId);
+      if (!vjson) return { ok: false, error: `版本 ${versionId} 未安装` };
+      const code = (payload && payload.lang) || 'zh_cn';
+      const res = assets.check(paths(), vjson, code);
+      return { ok: true, ...res, versionId };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('assets:repair', async (_, payload) => {
+    try {
+      const versionId = (payload && payload.versionId) || loadSettings().selectedVersionId;
+      if (!versionId) return { ok: false, error: '请先选择游戏版本' };
+      const vjson = readLocalVersionJSON(versionId);
+      if (!vjson) return { ok: false, error: `版本 ${versionId} 未安装` };
+      const code = (payload && payload.lang) || 'zh_cn';
+      const res = await assets.repair(paths(), vjson, code, (p) => {
+        if (win) win.webContents.send('launcher://assets-progress', { versionId, ...p });
+      });
+      return { ok: true, ...res, versionId };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  });
 
   ipcMain.handle('wiki:versionInfo', async (_, versionId) => {
     try {
@@ -2811,20 +3217,26 @@ if (process.env.CUBE_TEST_MODE !== '1') {
         pathname = decodeURIComponent(u.pathname).replace(/^\/+/, '');
       } catch { return new Response('Bad Request', { status: 400 }); }
       const segs = pathname.split('/').filter(Boolean);
+      const safeJoin = (base, parts) => {
+        const root = path.resolve(base);
+        const target = path.resolve(root, ...parts.filter(Boolean));
+        if (target !== root && !target.startsWith(root + path.sep)) return null;
+        return target;
+      };
       let file = '';
       if (host === 'model') {
-        
         const rel = segs.slice(2).join('/');
         const repo = segs.slice(0, 2).join('/');
         if (!repo || !rel) return new Response('Not Found', { status: 404 });
-        file = path.join(aiModels.modelDir(paths().launcher, repo), ...rel.split('/'));
+        file = safeJoin(aiModels.modelDir(paths().launcher, repo), rel.split('/'));
       } else if (host === 'ort') {
-        file = path.join(require('./ai-server').aiRuntimeDir(), 'ort', segs[0] || '');
+        file = safeJoin(require('./ai-server').aiRuntimeDir(), ['ort', segs[0] || '']);
       } else if (host === 'app') {
-        file = path.join(require('./ai-server').aiRuntimeDir(), ...segs);
+        file = safeJoin(require('./ai-server').aiRuntimeDir(), segs);
       } else {
         return new Response('Not Found', { status: 404 });
       }
+      if (!file) return new Response('Not Found', { status: 404 });
       if (!file || !exists(file)) return new Response('Not Found', { status: 404 });
       return net.fetch('file://' + file.replace(/\\/g, '/'));
     });
@@ -2848,6 +3260,27 @@ if (process.env.CUBE_TEST_MODE !== '1') {
     try { aiLocal.disposeWorker(); } catch {}
     try { if (aiServerInstance) aiServerInstance.close(); } catch {}
     try { onlineTunnelInstance.stop(); } catch {}
+    try { msLoginWindow && msLoginWindow.closeSession && msLoginWindow.closeSession(); } catch {}
+  });
+
+  // 兜底：点了关闭后如果还有残留资源（keep-alive 连接 / 未清理的定时器 /
+  // 子进程），进程会一直挂着 —— 任务栏看起来关了，后台还在跑，
+  // 单实例锁被占着，再次启动就打不开（只能去任务管理器手动结束）。
+  // 这里给一个硬超时，超时后强制退出，保证「关了就真的没了」。
+  let quitGuardTimer = null;
+  app.on('will-quit', () => {
+    if (quitGuardTimer) return;
+    quitGuardTimer = setTimeout(() => {
+      // 最后再清一次
+      try { aiLocal.disposeWorker(); } catch {}
+      try { if (aiServerInstance) aiServerInstance.close(); } catch {}
+      try { onlineTunnelInstance.stop(); } catch {}
+      try { stopGame(); } catch {}
+      // app.exit 会跳过 before-quit，但事件循环里残留的句柄会让 Node 不退出，
+      // 所以用 process.exit 硬走
+      process.exit(0);
+    }, 1500);
+    if (quitGuardTimer.unref) quitGuardTimer.unref();
   });
 }
 
