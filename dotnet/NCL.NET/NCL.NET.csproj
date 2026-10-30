@@ -11,10 +11,12 @@
     <Platforms>AnyCPU</Platforms>
     <Prefer32Bit>false</Prefer32Bit>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
-    <AssemblyVersion>1.5.0.0</AssemblyVersion>
-    <FileVersion>1.5.0.0</FileVersion>
+    <AssemblyVersion>1.10.6.0</AssemblyVersion>
+    <FileVersion>1.10.6.0</FileVersion>
     <Product>NCL — Nexus Craft Launcher</Product>
     <Company>NCL</Company>
+    <AssemblyTitle>NCL 启动器</AssemblyTitle>
+    <Description>NCL — Nexus Craft Launcher（网页内核版功能对齐）</Description>
     <NoWarn>CS1591;NU1701</NoWarn>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
     <GenerateBindingRedirectsOutputType>true</GenerateBindingRedirectsOutputType>
