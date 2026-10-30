@@ -35,6 +35,18 @@ function listListenPorts() {
     } catch {}
     return [...ports];
   }
+  if (process.platform === 'darwin') {
+    try {
+      const out = require('child_process').execFileSync(
+        'lsof', ['-nP', '-iTCP', '-sTCP:LISTEN'], { encoding: 'utf8', timeout: 8000, maxBuffer: 8 * 1024 * 1024 }
+      );
+      for (const line of out.split('\n').slice(1)) {
+        const m = line.match(/TCP\s+\S+:(\d+)\s+\(LISTEN\)/);
+        if (m) ports.add(parseInt(m[1], 10));
+      }
+    } catch {}
+    return [...ports];
+  }
   try {
     const out = require('child_process').execFileSync(
       'cat', ['/proc/net/tcp', '/proc/net/tcp6'], { encoding: 'utf8', timeout: 8000, maxBuffer: 8 * 1024 * 1024 }
@@ -49,41 +61,70 @@ function listListenPorts() {
   return [...ports];
 }
 
-function buildHandshake(host, port, name) {
-  const hb = Buffer.from(host, 'utf8');
-  const pH = Buffer.from([(port >> 8) & 0xff, port & 0xff]);
-  const handshake = Buffer.concat([
-    Buffer.from([0x00]),
-    pH,
-    Buffer.from([hb.length]), hb,
-    Buffer.from([0x02]),
+function varInt(value) {
+  let v = value >>> 0;
+  const out = [];
+  do {
+    let b = v & 0x7f;
+    v >>>= 7;
+    if (v > 0) b |= 0x80;
+    out.push(b);
+  } while (v > 0);
+  return Buffer.from(out);
+}
+
+function mcString(str) {
+  const b = Buffer.from(String(str), 'utf8');
+  return Buffer.concat([varInt(b.length), b]);
+}
+
+function buildHandshake(host, port, protocolVersion = 47) {
+  const body = Buffer.concat([
+    varInt(0x00),
+    varInt(protocolVersion),
+    mcString(host),
+    Buffer.from([(port >> 8) & 0xff, port & 0xff]),
+    varInt(0x01)
   ]);
-  const hsLen = Buffer.from([handshake.length]);
-  const nb = Buffer.from(name, 'utf8');
-  const login = Buffer.concat([
-    Buffer.from([0x00]),
-    Buffer.from([nb.length]), nb,
-  ]);
-  const lsLen = Buffer.from([login.length]);
-  return Buffer.concat([hsLen, handshake, lsLen, login]);
+  return Buffer.concat([varInt(body.length), body]);
 }
 
 function probeMinecraftPort(port, timeoutMs = 1500) {
   return new Promise((resolve) => {
     let settled = false;
-    const done = (v) => { if (!settled) { settled = true; try { sock.destroy(); } catch {} resolve(v); } };
+    let timer = null;
+    const done = (v) => {
+      if (settled) return;
+      settled = true;
+      if (timer) { clearTimeout(timer); timer = null; }
+      try { sock.destroy(); } catch {}
+      resolve(v);
+    };
     const sock = net.connect(port, '127.0.0.1');
     sock.setTimeout(timeoutMs);
+    timer = setTimeout(() => done(null), timeoutMs + 200);
     sock.on('connect', () => {
       try { sock.write(buildHandshake('127.0.0.1', port, 'NCLProbe')); } catch { done(null); }
     });
     sock.on('data', (d) => {
-      const id = d.length > 1 ? d[1] : -1;
-      if (id === 0x00 || id === 0x01 || id === 0x02) done({ port, packetId: id });
+      if (!d || d.length < 2) { done(null); return; }
+      let len = 0;
+      let shift = 0;
+      let idx = 0;
+      for (; idx < d.length && idx < 5; idx++) {
+        len |= (d[idx] & 0x7f) << shift;
+        shift += 7;
+        if ((d[idx] & 0x80) === 0) { idx++; break; }
+      }
+      if (idx >= d.length) { done(null); return; }
+      const id = d[idx];
+      if (id === 0x00 || id === 0x01) done({ port, packetId: id });
       else done(null);
     });
     sock.on('timeout', () => done(null));
     sock.on('error', () => done(null));
+    sock.on('end', () => done(null));
+    sock.on('close', () => done(null));
   });
 }
 
@@ -232,7 +273,7 @@ class Tunnel {
 
       proc.on('exit', (code) => {
         this._push(`隧道进程退出（code=${code}）`);
-        this.proc = null;
+        if (this.proc === proc) this.proc = null;
         if (!settled) { settled = true; reject(new Error('隧道进程意外退出，code=' + code)); }
         if (this.onExit) { try { this.onExit(code); } catch {} }
       });
@@ -288,7 +329,7 @@ class Tunnel {
               resolve({ ok: true, address: this.address, provider: 'ngrok', localPort });
             }
           }
-          if (/ERR|error|authentication failed/i.test(line) && !settled) {
+          if (/\bERR\b|authentication failed|authtoken.*(invalid|not found)|failed to start/i.test(line) && !settled) {
             settled = true;
             reject(new Error('ngrok 启动失败：' + line.trim()));
           }
@@ -303,7 +344,7 @@ class Tunnel {
       });
       proc.on('exit', (code) => {
         this._push(`ngrok 退出（code=${code}）`);
-        this.proc = null;
+        if (this.proc === proc) this.proc = null;
         if (!settled) { settled = true; reject(new Error('ngrok 意外退出，code=' + code)); }
         if (this.onExit) { try { this.onExit(code); } catch {} }
       });
@@ -383,9 +424,17 @@ function parseServerAddress(input) {
 async function probeRemoteServer(host, port, timeoutMs = 4000) {
   return new Promise((resolve) => {
     let settled = false;
-    const done = (v) => { if (!settled) { settled = true; try { sock.destroy(); } catch {} resolve(v); } };
+    let timer = null;
+    const done = (v) => {
+      if (settled) return;
+      settled = true;
+      if (timer) { clearTimeout(timer); timer = null; }
+      try { sock.destroy(); } catch {}
+      resolve(v);
+    };
     const sock = net.connect(port, host);
     sock.setTimeout(timeoutMs);
+    timer = setTimeout(() => done({ ok: false, reason: '连接超时' }), timeoutMs + 300);
     sock.on('connect', () => {
       try { sock.write(buildHandshake(host, port, 'NCLProbe')); } catch { done({ ok: false, reason: '发送握手失败' }); }
     });
@@ -400,6 +449,8 @@ async function probeRemoteServer(host, port, timeoutMs = 4000) {
       else done({ ok: false, reason: '对方不是 Minecraft 服务器' });
     });
     sock.on('timeout', () => done({ ok: false, reason: '连接超时' }));
+    sock.on('end', () => done({ ok: false, reason: '对方未返回有效数据' }));
+    sock.on('close', () => done({ ok: false, reason: '对方未返回有效数据' }));
     sock.on('error', (e) => done({ ok: false, reason: e.code === 'ECONNREFUSED' ? '对方拒绝连接（地址或端口不对？）' : (e.message || '连接失败') }));
   });
 }

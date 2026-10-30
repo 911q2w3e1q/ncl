@@ -27,7 +27,7 @@ const AI_RISK_TEXT = { low: '低风险', medium: '中风险', high: '高风险' 
 
 function aiRenderResult(analysis, versionId) {
   ai.analysis = analysis || {};
-  ai.versionId = versionId || ai.versionId;
+  if (versionId) ai.versionId = versionId;
   $('ai-status').hidden = true;
   $('ai-error').hidden = true;
   $('ai-result').hidden = false;
@@ -110,7 +110,7 @@ async function aiAnalyze(trigger) {
       aiShowError((r && r.error) || '分析失败');
       return;
     }
-    aiRenderResult(r.analysis, (r.analysis && r.analysis.versionId) || (state && state.settings && state.settings.selectedVersionId) || '');
+    aiRenderResult(r.analysis, r.versionId || (r.analysis && r.analysis.versionId) || ((state && state.settings && state.settings.selectedVersionId) || ''));
   } catch (e) {
     aiShowError(e.message || String(e));
   } finally {
@@ -145,7 +145,7 @@ async function aiApplySolution(actions, btn) {
     if (failed.length) toast(`有 ${failed.length} 项未能应用：${failed[0].error || ''}`);
 
     
-    const vid = ai.versionId || (state && state.selectedVersionId);
+    const vid = ai.versionId || (state && state.settings && state.settings.selectedVersionId);
     if (vid) {
       btn.textContent = '正在重启验证…';
       const la = await api('game:launch', vid);
@@ -179,9 +179,20 @@ function aiFmtSize(n) {
   return `${v} B`;
 }
 
+let aiDevicePref = 'auto';
+let aiDeviceInfo = null;
+
+const AI_DEVICE_LABEL = {
+  webgpu: '显卡（WebGPU）',
+  webnn: 'AI 计算单元（WebNN）',
+  wasm: 'CPU（WASM）',
+};
+
 function aiApplyModeUI() {
   const local = aiMode === 'local';
   const box = $('sp-ai-local-box');
+  const devCard = $('sp-ai-device-card');
+  if (devCard) devCard.hidden = !local;
   const base = $('sp-ai-baseurl-card');
   const key = $('sp-ai-apikey-card');
   const model = $('sp-ai-model-card');
@@ -201,6 +212,63 @@ function aiApplyModeUI() {
   const auto = $('sp-ai-auto');
   const autoCard = auto && auto.closest ? auto.closest('.set-card') : null;
   if (autoCard) autoCard.hidden = false;
+
+  const devSeg = $('sp-ai-device');
+  if (devSeg) {
+    for (const b of devSeg.querySelectorAll('.seg-item')) {
+      b.classList.toggle('seg-active', b.dataset.device === aiDevicePref);
+    }
+  }
+}
+
+function aiDeviceText(info) {
+  if (!info) return '正在检测可用设备…';
+  const parts = [];
+  const dev = info.device || 'wasm';
+  parts.push(`当前使用：${AI_DEVICE_LABEL[dev] || dev}`);
+  const ad = info.adapterInfo;
+  if (ad) {
+    const name = [ad.vendor, ad.architecture, ad.device, ad.description].filter(Boolean).join(' ');
+    if (name.trim()) parts.push(`适配器：${name.trim()}`);
+  }
+  if (dev === 'webgpu' && info.f16) parts.push('支持 fp16');
+  parts.push(`CPU 线程：${info.hardwareConcurrency || 0}`);
+  if (info.hasWebNN) parts.push('AI 计算单元：可用');
+  else if (info.webnnReason) parts.push(`AI 计算单元：不可用（${info.webnnReason}）`);
+  if (!info.hasWebGPU && info.gpuReason) parts.push(`显卡加速：不可用（${info.gpuReason}）`);
+  if (!info.crossOriginIsolated) parts.push('多线程未启用（页面未跨源隔离）');
+  if (info.variant) parts.push(`权重精度：${info.variant}`);
+  if (info.variantInstalled === false) parts.push('该精度权重尚未下载，将自动使用已下载的版本');
+  return parts.join(' · ');
+}
+
+async function aiLoadDeviceInfo() {
+  const el = $('sp-ai-device-status');
+  if (!el) return;
+  try {
+    const r = await api('ai:deviceInfo', { device: aiDevicePref });
+    if (r && r.ok) {
+      aiDeviceInfo = r;
+      el.textContent = aiDeviceText(r);
+    } else {
+      el.textContent = '设备检测失败：' + ((r && r.error) || '未知原因');
+    }
+  } catch (e) {
+    el.textContent = '设备检测失败：' + (e.message || String(e));
+  }
+}
+
+function aiBindDeviceSeg() {
+  const seg = $('sp-ai-device');
+  if (!seg) return;
+  for (const b of seg.querySelectorAll('.seg-item')) {
+    b.onclick = async () => {
+      aiDevicePref = b.dataset.device || 'auto';
+      aiApplyModeUI();
+      await aiSaveConfig(true);
+      await aiLoadDeviceInfo();
+    };
+  }
 }
 
 function aiRenderLocalModels() {
@@ -228,7 +296,10 @@ function aiRenderLocalModels() {
     meta.textContent = `${m.params} · ${aiFmtSize(m.size)}`;
     const note = document.createElement('div');
     note.className = 'ai-model-note';
-    note.textContent = m.installed ? '已下载到本地' : m.note;
+    const variantHint = aiDeviceInfo && aiDeviceInfo.variant
+      ? ` · 当前精度 ${aiDeviceInfo.variant}`
+      : '';
+    note.textContent = (m.installed ? '已下载到本地' : m.note) + variantHint;
     info.append(name, meta, note);
 
     const act = document.createElement('div');
@@ -287,7 +358,7 @@ async function aiDownloadLocalModel(m) {
   aiDownloadPercent = 0;
   aiRenderLocalModels();
   try {
-    const r = await api('ai:localDownload', { modelId: m.id });
+    const r = await api('ai:localDownload', { modelId: m.id, device: aiDevicePref });
     if (r && r.ok) {
       toast(`模型「${m.label}」下载完成`);
       aiLocalCurrentId = m.id;
@@ -318,6 +389,7 @@ async function aiLoadLocalModels() {
 
 async function aiLoadConfig() {
   try {
+    aiBindDeviceSeg();
     const cfg = await api('ai:getConfig');
     aiMode = (cfg && cfg.mode) === 'local' ? 'local' : 'cloud';
     aiLocalCurrentId = (cfg && cfg.localModelId) || aiLocalCurrentId;
@@ -333,8 +405,10 @@ async function aiLoadConfig() {
         ? '本地模式无需 API Key'
         : ((cfg && cfg.hasKey) ? '已配置' : '未配置 API Key');
     }
+    aiDevicePref = (cfg && cfg.aiDevice) || 'auto';
     aiApplyModeUI();
     await aiLoadLocalModels();
+    await aiLoadDeviceInfo();
   } catch (e) {
     $('sp-ai-test-result').textContent = '读取失败：' + e.message;
   }
@@ -348,7 +422,10 @@ async function aiSaveConfig(silent) {
     baseUrl: $('sp-ai-baseurl').value.trim(),
     model: $('sp-ai-model').value.trim(),
   };
-  if (aiMode === 'local') patch.localModelId = aiLocalCurrentId;
+  if (aiMode === 'local') {
+    patch.localModelId = aiLocalCurrentId;
+    patch.aiDevice = aiDevicePref;
+  }
   const key = $('sp-ai-apikey').value.trim();
   if (key) patch.apiKey = key;
   try {
