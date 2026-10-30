@@ -11,6 +11,7 @@ const AI_DEFAULTS = {
   apiKey: '',
   model: 'gpt-4o-mini',
   localModelId: 'smollm2-135m',
+  aiDevice: 'auto',
   temperature: 0.2,
   maxTokens: 2000,
   autoAnalyze: true,
@@ -24,6 +25,7 @@ function normalizeAiConfig(raw) {
   c.apiKey = String(c.apiKey || '').trim();
   c.model = String(c.model || AI_DEFAULTS.model).trim();
   c.localModelId = String(c.localModelId || AI_DEFAULTS.localModelId).trim();
+  c.aiDevice = ['auto', 'webgpu', 'webnn', 'wasm'].includes(c.aiDevice) ? c.aiDevice : AI_DEFAULTS.aiDevice;
   c.temperature = Number.isFinite(+c.temperature) ? Math.max(0, Math.min(2, +c.temperature)) : AI_DEFAULTS.temperature;
   c.maxTokens = Math.max(256, Math.min(8000, parseInt(c.maxTokens, 10) || AI_DEFAULTS.maxTokens));
   
@@ -47,15 +49,19 @@ function listCrashReports(gameDir) {
 }
 
 function readTail(file, maxBytes) {
+  let fd = null;
   try {
     const st = fs.statSync(file);
-    const fd = fs.openSync(file, 'r');
+    fd = fs.openSync(file, 'r');
     const len = Math.min(st.size, maxBytes);
     const buf = Buffer.alloc(len);
     fs.readSync(fd, buf, 0, len, st.size - len);
-    fs.closeSync(fd);
     return buf.toString('utf8');
-  } catch { return ''; }
+  } catch {
+    return '';
+  } finally {
+    if (fd !== null) { try { fs.closeSync(fd); } catch {} }
+  }
 }
 
 function extractErrorLines(text) {
@@ -296,7 +302,8 @@ function parseLooseText(text) {
 
 async function analyzeCrash(cfgIn, ctx, localRunner) {
   const cfg = normalizeAiConfig(cfgIn);
-  const messages = buildPrompt(collectCrashContext(ctx), cfg.mode === 'local');
+  const crashCtx = collectCrashContext(ctx);
+  const messages = buildPrompt(crashCtx, cfg.mode === 'local');
 
   let content;
   if (cfg.mode === 'local') {
@@ -330,7 +337,7 @@ async function analyzeCrash(cfgIn, ctx, localRunner) {
       const loose = parseLooseText(content);
       if (loose) {
         
-        const rule = analyzeByRules(collectCrashContext(ctx));
+        const rule = analyzeByRules(crashCtx);
         const analysis = normalizeAnalysis({
           summary: rule.summary || loose.summary,
           confidence: rule.matched ? 'medium' : 'low',

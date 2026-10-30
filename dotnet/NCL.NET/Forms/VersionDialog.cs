@@ -21,6 +21,7 @@ namespace Ncl.Forms
         private ListBox _vanillaList, _fabricList, _forgeList, _neoList, _quiltList;
         private ComboBox _fabricMc, _forgeMc, _neoMc, _quiltMc;
         private Button _btnVanillaReload, _btnFabricRefresh, _btnForgeRefresh, _btnNeoRefresh, _btnQuiltRefresh;
+        private CheckBox _chkFabricApi;
 
         private List<string> _fabricVersions = new List<string>();
         private List<string> _forgeVersions = new List<string>();
@@ -132,6 +133,18 @@ namespace Ncl.Forms
             _fabricList = MakeList();
             _fabricList.Location = new Point(10, 46);
             page.Controls.Add(_fabricList);
+            // Fabric API 是绝大多数 Fabric 模组的必需依赖，默认勾选随加载器一起装
+            _chkFabricApi = new CheckBox
+            {
+                Text = "同时安装 Fabric API（多数 Fabric 模组的必需依赖）",
+                Checked = true,
+                AutoSize = true,
+                ForeColor = Theme.Text,
+                BackColor = Theme.Bg,
+                Font = new Font("Microsoft YaHei UI", 8.5F),
+                Location = new Point(10, 318)
+            };
+            page.Controls.Add(_chkFabricApi);
             var btn = Ui.MakeButton("安装选中版本", true, 110);
             btn.Location = new Point(420, 320);
             btn.Click += async (s, e) => await InstallFabric();
@@ -377,13 +390,23 @@ namespace Ncl.Forms
         {
             string mc = _fabricMc.SelectedItem as string;
             if (string.IsNullOrEmpty(mc)) { Ui.Toast(this, "请先选择 MC 版本", true); return; }
+            bool withApi = _chkFabricApi != null && _chkFabricApi.Checked;
             try
             {
                 _status.Text = "正在安装 Fabric…";
-                string id = await Loaders.InstallFabric(mc, MakeProgress()).ConfigureAwait(true);
+                var apiResult = new FabricApiResult();
+                string id = await Loaders.InstallFabric(mc, MakeProgress(), withApi, apiResult).ConfigureAwait(true);
                 _status.Text = id + " 安装完成";
                 LoadInstalled();
-                Ui.Toast(this, id + " 安装完成");
+                if (withApi)
+                {
+                    if (apiResult.Ok)
+                        Ui.Toast(this, id + " 安装完成，Fabric API " + apiResult.Version + " 已装好");
+                    else
+                        Ui.Toast(this, id + " 安装完成，但 " + apiResult.Skipped, true);
+                }
+                else
+                    Ui.Toast(this, id + " 安装完成");
             }
             catch (Exception e) { _status.Text = "安装失败：" + e.Message; Ui.Toast(this, "安装失败：" + e.Message, true); }
         }

@@ -3,10 +3,13 @@ const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 const INVOKE_CHANNELS = new Set([
   'launcher:getState', 'launcher:setGameRoot', 'launcher:migrateGameRoot',
-  'account:loginOffline', 'account:loginYggdrasil', 'account:loginMicrosoft', 'account:select', 'account:remove', 'account:refreshTextures',
+  'account:loginOffline', 'account:loginYggdrasil', 'account:loginMicrosoft', 'account:loginMicrosoftPassword', 'account:select', 'account:remove', 'account:refreshTextures',
   'skin:fetch',
   'versions:manifest', 'versions:install', 'versions:installFabric', 'versions:loaderCatalog', 'versions:loaderVersions', 'versions:installLoader', 'versions:select', 'versions:delete',
   'settings:save', 'dialog:pickJava', 'dialog:pickGameRoot',
+  'assets:check', 'assets:repair',
+  'saves:list', 'saves:import', 'saves:scanOtherLaunchers', 'saves:pickOtherRoot', 'saves:listServers',
+  'ai:deviceInfo',
   'theme:pickBackground', 'theme:resetBackground',
   'game:launch', 'game:stop',
   'ai:getConfig', 'ai:setConfig', 'ai:test', 'ai:analyze', 'ai:applyActions', 'ai:rollback',
@@ -20,7 +23,7 @@ const INVOKE_CHANNELS = new Set([
   'shell:openPath', 'shell:openExternal',
   'window:minimize', 'window:maximize', 'window:close',
 ]);
-const EVENT_CHANNELS = new Set(['launcher://progress', 'launcher://game-log', 'launcher://game-exit', 'launcher://dl-progress', 'launcher://ms-code', 'launcher://up-progress', 'launcher://up-available', 'launcher://ai-analysis', 'launcher://game-crashed', 'launcher://ai-local-progress']);
+const EVENT_CHANNELS = new Set(['launcher://progress', 'launcher://game-log', 'launcher://game-exit', 'launcher://dl-progress', 'launcher://ms-code', 'launcher://ms-password-status', 'launcher://up-progress', 'launcher://up-available', 'launcher://ai-analysis', 'launcher://game-crashed', 'launcher://ai-local-progress', 'launcher://assets-progress']);
 
 contextBridge.exposeInMainWorld('cube', {
   invoke(channel, ...args) {

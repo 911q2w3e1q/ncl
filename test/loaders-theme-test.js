@@ -25,7 +25,9 @@ t('installerJavaMajor：按 MC 版本映射 Java 主版本', () => {
   assert.strictEqual(M.installerJavaMajor('1.20.1'), 17);
   assert.strictEqual(M.installerJavaMajor('1.21'), 21);
   assert.strictEqual(M.installerJavaMajor('1.21.4'), 21);
-  assert.strictEqual(M.installerJavaMajor('26.3'), 17);
+  assert.strictEqual(M.installerJavaMajor('26.1'), 25);
+  assert.strictEqual(M.installerJavaMajor('26.3'), 25);
+  assert.strictEqual(M.installerJavaMajor('26.4-snapshot-6'), 25);
 });
 
 t('neoforgePrefix：MC 版本 → NeoForge 版本前缀', () => {
@@ -33,6 +35,8 @@ t('neoforgePrefix：MC 版本 → NeoForge 版本前缀', () => {
   assert.strictEqual(M.neoforgePrefix('1.20.4'), '20.4');
   assert.strictEqual(M.neoforgePrefix('1.21'), '21.0');
   assert.strictEqual(M.neoforgePrefix('1.21.5'), '21.5');
+  assert.strictEqual(M.neoforgePrefix('26.3'), '26.3.0');
+  assert.strictEqual(M.neoforgePrefix('26.1.2'), '26.1.2');
   assert.strictEqual(M.neoforgePrefix('garbage'), null);
 });
 
