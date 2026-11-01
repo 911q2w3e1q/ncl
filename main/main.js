@@ -20,9 +20,10 @@ const onlineTunnel = require('./online-tunnel');
 const msLoginWindow = require('./ms-login-window');
 const saves = require('./saves');
 const gameLayout = require('./game-layout');
+const joinServer = require('./join-server');
 
 const LAUNCHER_NAME = 'NCL';
-const LAUNCHER_VERSION = '1.11.2';
+const LAUNCHER_VERSION = '1.11.3';
 const MANIFEST_URL = 'https://piston-meta.mojang.com/mc/game/version_manifest_v2.json';
 const JAVA_MANIFEST_URL = 'https://launchermeta.mojang.com/v1/products/java-runtime/2ec0cc96c44e5a76b9c8b7c39df7210883d12871/all.json';
 const GITHUB_REPO = '911q2w3e1q/ncl';
@@ -717,6 +718,12 @@ function loadSettings() {
   if (s.global && !s.global.layoutV2) {
     s.global.isolation = true;
     s.global.layoutV2 = true;
+    try { saveSettings(s); } catch { }
+  }
+  // 一次性迁移：早期「加入联机」会把地址写进 perVersion[版本].serverAddress 并落盘，
+  // 导致之后每次启动该版本都自动去连那个地址（地址失效就报「没有找到该主机」），
+  // 而设置页里看不见这个值。现在「加入」只是一次性启动参数，这里清掉历史残留。
+  if (joinServer.purgeLegacyPerVersionServerAddress(s)) {
     try { saveSettings(s); } catch { }
   }
   return s;
@@ -1586,7 +1593,7 @@ function ensureOptionsTxt(gameDir) {
   } catch {}
 }
 
-function buildLaunchCommand(versionId, account, settings) {
+function buildLaunchCommand(versionId, account, settings, launchOptions) {
   const P = paths();
   const vjson = readLocalVersionJSON(versionId);
   if (!vjson) throw new Error(`版本 ${versionId} 未安装`);
@@ -1606,7 +1613,7 @@ function buildLaunchCommand(versionId, account, settings) {
 
   const log4jFile = path.join(P.versions, versionId, 'log4j2.xml');
   
-  const server = (vs.serverAddress || '').trim();
+  const server = joinServer.resolveServerAddress(vs, launchOptions ? launchOptions.serverAddress : undefined);
   const vars = {
     ...PLACEHOLDER_DOCS,
     natives_directory: nativesDir,
@@ -1712,6 +1719,7 @@ function buildLaunchCommand(versionId, account, settings) {
     gameArgs,
     gameDir,
     nativesDir,
+    serverAddress: server,
   };
 }
 
@@ -1719,7 +1727,7 @@ let gameProc = null;
 let launching = false;
 let stopping = false;
 
-async function prepareLaunch(versionId, onLog) {
+async function prepareLaunch(versionId, onLog, launchOptions) {
   if (launching) throw new Error('正在启动中，请稍候');
   if (gameProc) throw new Error('游戏已在运行');
   launching = true;
@@ -1734,7 +1742,7 @@ async function prepareLaunch(versionId, onLog) {
   } else if (account.type === ACCOUNT_TYPES.MICROSOFT) {
     try { await microsoftRefresh(account); saveAccounts({ accounts, selectedId }); } catch {}
   }
-  const cmd = buildLaunchCommand(versionId, account, settings);
+  const cmd = buildLaunchCommand(versionId, account, settings, launchOptions);
   const vs = versionSettings(settings, versionId);
   ensureOptionsTxt(cmd.gameDir);
   await ensureLangAssets(versionId, vjson);
@@ -1744,7 +1752,27 @@ async function prepareLaunch(versionId, onLog) {
   const finalArgs = [...cmd.jvmArgs, cmd.mainClass, ...cmd.gameArgs];
   const env = { ...process.env };
   if (process.platform === 'linux' && !env.LD_LIBRARY_PATH) env.LD_LIBRARY_PATH = cmd.nativesDir;
+  // 自动进服前先探一下：地址不可达时游戏只会弹一句含糊的「没有找到该主机」，
+  // 这里提前把真实原因说清楚（隧道已关 / 对方不在线 / 端口不对）。
+  if (cmd.serverAddress) await warnIfServerUnreachable(cmd.serverAddress, onLog);
   return { cmd, finalArgs, env, java, vjson };
+}
+
+// 自动进服目标不可达时，把原因写进游戏日志（不阻断启动）。
+async function warnIfServerUnreachable(address, onLog) {
+  const parsed = onlineTunnel.parseServerAddress(address);
+  if (!parsed) return null;
+  let result = null;
+  try { result = await onlineTunnel.probeRemoteServer(parsed.host, parsed.port, 2500); }
+  catch { return null; }
+  if (result && result.ok) return result;
+  const reason = (result && result.reason) || '无法连接';
+  const lines = [
+    `[NCL] 正在自动进入 ${parsed.address}，但探测失败：${reason}`,
+    '[NCL] 若游戏弹出「没有找到该主机」，多半是对方已离线或临时隧道已关闭；可到「设置 → 自动进入服务器」清空该地址。',
+  ];
+  for (const l of lines) { try { onLog(l); } catch {} }
+  return result;
 }
 
 async function ensureLangAssets(versionId, vjson) {
@@ -1798,8 +1826,8 @@ function watchGameExit(proc, onLog) {
   });
 }
 
-async function launchGame(versionId, onLog) {
-  const prep = await prepareLaunch(versionId, onLog);
+async function launchGame(versionId, onLog, launchOptions) {
+  const prep = await prepareLaunch(versionId, onLog, launchOptions);
   try {
     const proc = spawn(prep.java.path, prep.finalArgs, { cwd: prep.cmd.gameDir, env: prep.env, detached: false });
     gameProc = proc;
@@ -2682,7 +2710,12 @@ function registerIPC() {
     if (patch.perVersion) {
       s.perVersion = s.perVersion || {};
       for (const [vid, cfg] of Object.entries(patch.perVersion)) {
-        s.perVersion[vid] = { ...(s.perVersion[vid] || {}), ...(cfg || {}) };
+        const merged = { ...(s.perVersion[vid] || {}), ...(cfg || {}) };
+        // 值为 null 表示删除该字段（例如清空「自动进入服务器」后不再被版本级残留覆盖）
+        for (const [k, v] of Object.entries(cfg || {})) {
+          if (v === null) delete merged[k];
+        }
+        s.perVersion[vid] = merged;
       }
     }
     if ('selectedVersionId' in patch) s.selectedVersionId = patch.selectedVersionId;
@@ -2769,12 +2802,11 @@ function registerIPC() {
       const versionId = (payload && payload.versionId) || loadSettings().selectedVersionId;
       if (!versionId) return { ok: false, error: '请先选择游戏版本' };
 
-      const settings = loadSettings();
-      settings.perVersion = settings.perVersion || {};
-      settings.perVersion[versionId] = { ...(settings.perVersion[versionId] || {}), serverAddress: parsed.address };
-      saveSettings(settings);
-
-      prep = await prepareLaunch(versionId, (line) => { if (win) win.webContents.send('launcher://game-log', line); });
+      // 「加入」是一次性动作：地址只用于本次启动，不再写进设置。
+      // 否则地址会永久留在该版本上，之后每次启动都自动去连它——
+      // 隧道/朋友一旦下线就报「没有找到该主机」，而设置页里还看不见这个值。
+      prep = await prepareLaunch(versionId, (line) => { if (win) win.webContents.send('launcher://game-log', line); },
+        { serverAddress: parsed.address });
       const proc = spawn(prep.java.path, prep.finalArgs, { cwd: prep.cmd.gameDir, env: prep.env, detached: false });
       gameProc = proc;
       watchGameExit(proc, (line) => { if (win) win.webContents.send('launcher://game-log', line); })
