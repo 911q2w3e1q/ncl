@@ -456,6 +456,15 @@ function currentVS() {
   const p = (vid && (st.perVersion || {})[vid]) || {};
   return { ...g, ...p };
 }
+// 当前选中版本真正生效的「自动进服地址」：版本级优先于全局，
+// 与主进程 versionSettings() 保持同一口径。
+function effectiveServerAddress() {
+  const st = state.settings || {};
+  const vid = st.selectedVersionId;
+  const g = (st.global || {}).serverAddress || '';
+  const p = ((vid && (st.perVersion || {})[vid]) || {}).serverAddress || '';
+  return String(p).trim() || String(g).trim();
+}
 function renderSettingsCard() {
   const vs = currentVS();
   const maxGB = sysMemMaxGB();
@@ -584,7 +593,20 @@ function renderSettingsPage() {
   
   $('sp-jvmargs').value = g.jvmArgs || '';
   $('sp-isolation').checked = !!g.isolation;
-  $('sp-server').value = g.serverAddress || '';
+  // 「自动进入服务器」显示真实生效值：版本级残留优先于全局（versionSettings 同口径）。
+  // 否则玩家在设置里看到是空的，游戏却一直自动进服——完全对不上。
+  const effServer = effectiveServerAddress();
+  $('sp-server').value = effServer;
+  const sHint = $('sp-server-hint');
+  if (sHint) {
+    const vid = state.settings.selectedVersionId;
+    const pv = (vid && (state.settings.perVersion || {})[vid]) || {};
+    const hasVersionLevel = !!(pv.serverAddress || '').trim();
+    sHint.hidden = !hasVersionLevel;
+    sHint.textContent = hasVersionLevel
+      ? `注意：版本 ${vid} 单独设置了自动进服地址（${pv.serverAddress}），会覆盖上面这个全局值`
+      : '';
+  }
   $('sp-mirror').checked = !!g.mirror;
   
   applyTheme(g);
@@ -648,7 +670,15 @@ function bindSettingsPage() {
   
   $('sp-jvmargs').addEventListener('change', (e) => save({ jvmArgs: e.target.value.trim() }));
   $('sp-isolation').addEventListener('change', (e) => save({ isolation: e.target.checked }));
-  $('sp-server').addEventListener('change', (e) => save({ serverAddress: e.target.value.trim() }));
+  // 改全局自动进服地址时，同时清掉当前版本可能存在的版本级残留，
+  // 否则版本级的旧地址会继续覆盖这里填的值（玩家改完发现没生效）。
+  $('sp-server').addEventListener('change', (e) => {
+    const val = e.target.value.trim();
+    const vid = state.settings.selectedVersionId;
+    const patch = { serverAddress: val };
+    if (vid) api('settings:save', { global: patch, perVersion: { [vid]: { serverAddress: null } } });
+    else api('settings:save', { global: patch });
+  });
   $('sp-mirror').addEventListener('change', (e) => save({ mirror: e.target.checked }));
   
   document.querySelectorAll('.set-swatch').forEach((btn) => {
@@ -2483,7 +2513,8 @@ async function onlineJoin() {
     const r = await api('online:joinServer', { address: input, versionId });
     if (r && r.ok) {
       msg.className = 'on-join-msg ok';
-      msg.textContent = '已启动游戏，正在自动连接 ' + input + (warn || '（若没自动进服，手动点多人游戏→添加服务器）');
+      msg.textContent = '已启动游戏，正在自动连接 ' + input
+        + (warn || '') + '（仅本次生效，不会保存；想永久自动进服请在「设置 → 自动进入服务器」里填）';
       toast('正在启动游戏并连接 ' + input, true);
     } else {
       msg.className = 'on-join-msg err';
