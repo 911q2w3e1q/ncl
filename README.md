@@ -2,6 +2,8 @@
 
 一个自玩的 Minecraft Java 版启动器。当前版本聚焦**「开始游戏」主链路**：账户 → 选版本 → 版本设置 → 一键启动，外加完整的**下载中心**（Modrinth / 镜像站双来源，六大内容分类）、**启动器设置**、**Wiki 整合页**与 **AI 报错分析**（崩溃自动分析原因 + 一键修复）。
 
+**游戏目录与 PCL / 官方启动器完全同构**（v1.11.0 起）：版本隔离 = `versions/<版本名>/`，`mods` / `config` / `saves` / `options.txt` 直接同层，没有额外的 `game` 子层。把游戏目录指向 PCL 的 `.minecraft` 即可直接接着玩，存档、模组、服务器列表都是同一份。
+
 **v1.5.0 起提供两个实现**：默认的 Electron 版（三平台通用，界面特效完整），以及用 **C# / .NET Framework 4.8 完全重写**的 **.NET 版**（仅 Windows，包体 ~0.5 MB，空闲常驻内存约为 Electron 版的 1/5，支持 Win7 SP1）。两者功能一致、并存使用。
 
 ## 功能
@@ -206,6 +208,11 @@ NCL/
 ## 说明
 
 - 游戏数据默认存放在 `<用户目录>/.config/ncl/minecraft`（Windows 为 `%APPDATA%\ncl\minecraft`，macOS 为 `~/Library/Application Support/ncl/minecraft`），结构兼容官方启动器
+- **游戏目录布局与 PCL / 官方启动器一致**（v1.11.0 起）：开启版本隔离时游戏目录就是 `versions/<版本名>/`，`mods` / `config` / `saves` / `options.txt` / `resourcepacks` 与 PCL 完全同层，不存在额外的 `game` 子层
+  - 因此**可以直接把游戏目录指向 PCL 的 `.minecraft`**：存档、模组、配置、服务器列表全部通用，两个启动器共用同一份数据
+  - 自动识别 PCL 安装目录（标记 `PCL/` / `PCL.json` / `PCL2/` / `PCL3/`，标记与 `.minecraft` **平级**也能识别）
+  - 旧版 NCL 布局（`versions/<版本名>/game/`）在切换目录后**自动上移合并**，残留空壳 `game/` 目录自动清理（不覆盖任何已有文件）
+  - 版本隔离默认开启，与 PCL 行为一致
 - 颜色不是最终版，当前为主题占位配色；交互按钮按约定统一为蓝色
 - 跨平台适配：macOS 下启动自动追加 `-XstartOnFirstThread`（LWJGL/GLFW 要求 JVM 主线程启动）；Java 运行时按平台自动选择 `windows-x64` / `mac-os-arm64` / `mac-os-x64` / `linux-x64` 变体；classpath 分隔符与 `LD_LIBRARY_PATH` 按平台处理
 
