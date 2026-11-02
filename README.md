@@ -1,6 +1,6 @@
 # NCL — Nexus Craft Launcher
 
-一个自玩的 Minecraft Java 版启动器。当前版本聚焦**「开始游戏」主链路**：账户 → 选版本 → 版本设置 → 一键启动，外加完整的**下载中心**（Modrinth / 镜像站双来源，六大内容分类）、**启动器设置**、**Wiki 整合页**与 **AI 报错分析**（崩溃自动分析原因 + 一键修复）。
+一个自玩的 Minecraft Java 版启动器。当前版本聚焦**「开始游戏」主链路**：账户 → 选版本 → 版本设置 → 一键启动，外加完整的**下载中心**（Modrinth / CurseForge / 镜像站三来源，六大内容分类）、**启动器设置**、**Wiki 整合页**与 **AI 报错分析**（崩溃自动分析原因 + 一键修复）。
 
 **游戏目录与 PCL / 官方启动器完全同构**（v1.11.0 起）：版本隔离 = `versions/<版本名>/`，`mods` / `config` / `saves` / `options.txt` 直接同层，没有额外的 `game` 子层。把游戏目录指向 PCL 的 `.minecraft` 即可直接接着玩，存档、模组、服务器列表都是同一份。
 
@@ -45,10 +45,16 @@
   - 启动链路加固：进程拉起失败（如 Java 异常退出）立即在界面报错，不再「点了没反应」；连点有并发锁；内存上限按系统实际内存自动封顶（至少给系统留 512MB）
 - **下载中心**（顶部导航「下载」）
   - 六个分类：原版游戏 / Mod / 整合包 / 数据包 / 资源包 / 光影包
-  - 双来源：Modrinth（免费免 Key）+ 镜像站（BMCLAPI，加速原版下载）
+  - 三来源：Modrinth（免费免 Key）+ **CurseForge（免费免 Key，经 MCIM 镜像加速）** + 镜像站（BMCLAPI，加速原版下载）
   - 搜索 + MC 版本 / 加载器筛选；悬停列表项即在右侧灰色面板显示介绍、最新 / 最老版本、支持的 MC 版本范围
   - 一键安装：Mod / 资源包 / 光影包 / 数据包装入当前版本游戏目录（尊重版本隔离）；Modrinth 整合包自动解析 `modrinth.index.json`、装基础版本与 Fabric、下载全部文件并解压 overrides；原版分类支持镜像站加速
-  - **本地导入**：Modrinth 上没有的内容（如 CurseForge 独占模组 / 整合包），从网页下载后点「导入本地文件」——jar 直接装入对应目录，整合包 zip 自动走解析安装
+  - **CurseForge 接入**（v1.11.4）：切到 CurseForge 来源即可搜到 Modrinth 没有的内容
+    - 走国内公益镜像 `mod.mcimirror.top`（MCIM），**不需要任何 API Key**，也不受 CurseForge 官方接口在国内访问超时的影响
+    - Modrinth / CurseForge 双源均免 Key；镜像站不可用时可在「设置 → CurseForge API Key」填入自备 Key（`console.curseforge.com` 免费自助申请）自动回退官方接口
+    - **自动补前置依赖**：CurseForge 模组普遍带 Required 依赖，安装时一并递归下载（去重 + 限深 4 层，避免循环依赖），不用再手动一个个装
+    - **CurseForge 整合包**：解析 `manifest.json`，装基础版本与 Fabric 加载器、下载全部文件、解压 overrides
+    - 已知的平台限制：部分作者在 CurseForge 上开启了「禁止第三方启动器下载」，这类内容任何启动器都拿不到，只能浏览器下载后用「导入本地文件」装入
+  - **本地导入**：Modrinth / CurseForge 上没有的内容，从网页下载后点「导入本地文件」——jar 直接装入对应目录，整合包 zip 自动走解析安装
   - **拖拽导入**：把 .jar / .zip / .mrpack 直接拖到窗口任意位置——jar 自动装为 Mod；zip 弹类型选择（整合包 / 资源包 / 光影包 / 数据包），整合包同样走完整解析安装
   - **模组加载器安装**（v1.6.1）：点原版游戏 → 选加载器（Fabric / Forge / NeoForge / Quilt）→ 选具体版本 → 一键安装
     - **装 Fabric 时顺手装 Fabric API**（默认勾选，版本号实时从 Modrinth 拉）——不用再自己切到 Mod 页搜「Fabric API」手动装；不想要可取消勾选
@@ -139,6 +145,7 @@ npm start
 ```bash
 npm test              # 核心逻辑单测（规则求值、UUID、Java 探测、LittleSkin 接口）
 node test/download-test.js  # 下载中心连通性（Modrinth 搜索/详情/分类）
+node test/curseforge-test.js # CurseForge 接入（镜像搜索/详情/CDN 改写/manifest 解析/依赖安装）
 node test/coverage-test.js  # Modrinth 覆盖率回归（33 个主流模组含弯引号变体，验证删 CF 后内容库够用）
 node test/import-test.js   # 本地整合包导入端到端（最小 .mrpack → 装 1.20.1+Fabric → 解压 overrides）
 node test/wiki-test.js     # Wiki 版本信息（已安装/未安装/不存在 + Java 主版本/SHA1/jar 大小）
@@ -189,7 +196,7 @@ NCL/
 ## 下载页布局（按设计草图）
 
 - **粉色分类页签**（顶部一行）：原版游戏 / Mod / 整合包 / 数据包 / 资源包 / 光影包
-- **工具栏**：来源切换（Modrinth / 镜像站）+ 蓝色搜索框 + MC 版本 / 加载器筛选 + 导入本地文件
+- **工具栏**：来源切换（Modrinth / CurseForge / 镜像站）+ 蓝色搜索框 + MC 版本 / 加载器筛选 + 导入本地文件
 - **主体**：左侧黄色内容列表（图标、名称、简介、下载量），右侧灰色悬停详情面板
   （介绍、最新 / 最老版本、支持 MC 版本范围、加载器、版本列表、安装按钮）
 
