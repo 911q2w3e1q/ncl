@@ -21,9 +21,10 @@ const msLoginWindow = require('./ms-login-window');
 const saves = require('./saves');
 const gameLayout = require('./game-layout');
 const joinServer = require('./join-server');
+const curseforge = require('./curseforge');
 
 const LAUNCHER_NAME = 'NCL';
-const LAUNCHER_VERSION = '1.11.3';
+const LAUNCHER_VERSION = '1.11.4';
 const MANIFEST_URL = 'https://piston-meta.mojang.com/mc/game/version_manifest_v2.json';
 const JAVA_MANIFEST_URL = 'https://launchermeta.mojang.com/v1/products/java-runtime/2ec0cc96c44e5a76b9c8b7c39df7210883d12871/all.json';
 const GITHUB_REPO = '911q2w3e1q/ncl';
@@ -2031,8 +2032,86 @@ async function installContent(payload, onProgress) {
   if (category === 'vanilla') {
     return await installVersion(payload.versionId, (p) => onProgress({ ...p, category: 'vanilla' }), source === 'mirror' ? BMCLAPI : null);
   }
-  if (category === 'modpack') return await installModpack(payload, onProgress);
+  if (category === 'modpack') {
+    if (source === 'curseforge') return await installCurseModpack(payload, onProgress);
+    return await installModpack(payload, onProgress);
+  }
   return await installSingleFile(payload, onProgress);
+}
+
+/**
+ * 安装 CurseForge 整合包（manifest.json 格式）。
+ * 走 MCIM 镜像，不需要 API Key。
+ */
+async function installCurseModpack(payload, onProgress) {
+  const g = (loadSettings().global || {});
+  const apiKey = g.curseforgeApiKey || '';
+  const gameDir = contentGameDir();
+  const packDir = path.join(gameDir, 'modpacks');
+  ensureDir(packDir);
+  const fileName = payload.fileName || `curseforge-${payload.projectId}.zip`;
+  const packPath = path.join(packDir, fileName);
+  onProgress({ stage: 'pack', message: `下载整合包 ${fileName}`, percent: 0, speed: 0 });
+  if (!exists(packPath)) {
+    await downloadFile(payload.url, packPath, { sha1: payload.sha1 || undefined, retries: 3 });
+  }
+  const extractDir = path.join(paths().launcher, 'tmp', `cfmodpack-${Date.now()}`);
+  await extractZip(packPath, extractDir);
+  try {
+    const manifestPath = path.join(extractDir, 'manifest.json');
+    if (!exists(manifestPath)) throw new Error('不是有效的 CurseForge 整合包（缺少 manifest.json）');
+    const manifest = curseforge.parseManifest(JSON.parse(fs.readFileSync(manifestPath, 'utf8')));
+
+    const mc = manifest.mc;
+    if (mc && !readLocalVersionJSON(mc)) {
+      onProgress({ stage: 'json', message: `安装基础版本 ${mc}`, percent: 0, speed: 0 });
+      await installVersion(mc, onProgress);
+    }
+
+    const loaderType = manifest.loaderType, loaderVer = manifest.loaderVer;
+    let fabricVersionId = null;
+    let loaderNote = '';
+    if (loaderType === 'fabric' && mc) {
+      try {
+        await installFabric(mc, onProgress, loaderVer);
+        fabricVersionId = `fabric-loader-${loaderVer}-${mc}`;
+      } catch (e) {
+        loaderNote = `Fabric 安装失败（${e.message}），请手动安装`;
+      }
+    } else if (loaderType) {
+      loaderNote = `该整合包需要 ${loaderType} ${loaderVer}，NCL 暂不支持自动安装该加载器，请到版本页手动安装后再启动`;
+    }
+
+    const files = manifest.files;
+    const modsDir = path.join(gameDir, 'mods');
+    ensureDir(modsDir);
+    let done = 0;
+    let failed = 0;
+    onProgress({ stage: 'files', message: `下载整合包文件 (0/${files.length})`, percent: 0, speed: 0 });
+    await mapLimit(files, 6, async (f) => {
+      done++;
+      if (!f || !f.fileID || !f.projectID) return;
+      try {
+        const entry = await curseforge.getFileById(f.projectID, f.fileID, { apiKey });
+        if (!entry || !entry.url) { failed++; return; }
+        const dest = path.join(modsDir, entry.fileName);
+        if (exists(dest)) return;
+        await downloadFile(entry.url, dest, { sha1: entry.sha1 || undefined, retries: 2 });
+      } catch {
+        failed++;
+      }
+      onProgress({ stage: 'files', message: `下载整合包文件 (${done}/${files.length})`, percent: Math.round((done / Math.max(1, files.length)) * 100), speed: 0 });
+    });
+
+    const overridesName = manifest.overridesName;
+    const overridesDir = path.join(extractDir, overridesName);
+    if (exists(overridesDir)) await copyDirAsync(overridesDir, gameDir);
+
+    onProgress({ stage: 'done', message: `整合包 ${path.basename(packPath)} 安装完成`, percent: 100, speed: 0 });
+    return { path: packPath, fabricVersionId, loaderNote, failedFiles: failed, totalFiles: files.length };
+  } finally {
+    try { fs.rmSync(extractDir, { recursive: true, force: true }); } catch {}
+  }
 }
 
 async function installSingleFile(payload, onProgress) {
@@ -2049,7 +2128,50 @@ async function installSingleFile(payload, onProgress) {
       percent: p.total ? Math.round((p.loaded / p.total) * 100) : 0, speed: p.speed,
     }),
   });
-  return { path: dest };
+  // CurseForge 模组普遍带前置依赖，不装的话进游戏必崩，这里顺手一起装上。
+  let installedDeps = 0;
+  if (payload.source === 'curseforge' && Array.isArray(payload.requiredDeps) && payload.requiredDeps.length) {
+    const g = (loadSettings().global || {});
+    const seen = new Set([String(payload.versionId || '')]);
+    installedDeps = await installCurseDeps(payload.requiredDeps, dir, g.curseforgeApiKey || '', onProgress, seen, 0, {
+      mcVersion: payload.mcVersion || '', loader: payload.loader || '',
+    });
+  }
+  return { path: dest, installedDeps };
+}
+
+/**
+ * 递归安装 CurseForge 前置依赖（relationType = Required）。
+ * seen 做去重，防止循环依赖；depth 限制递归层数。
+ * CurseForge 的 dependencies 只给 modId、不给 fileId，所以要回查文件列表定位具体文件。
+ */
+async function installCurseDeps(deps, dir, apiKey, onProgress, seen, depth, ctx = {}) {
+  if (depth > 4 || !Array.isArray(deps)) return 0;
+  let n = 0;
+  for (const dep of deps) {
+    if (!dep || !dep.modId) continue;
+    const key = String(dep.fileId || dep.modId);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    try {
+      let entry = null;
+      if (dep.fileId) entry = await curseforge.getFileById(dep.modId, dep.fileId, { apiKey });
+      if (!entry) {
+        entry = await curseforge.getLatestFile(dep.modId, {
+          mcVersion: ctx.mcVersion || '', loader: ctx.loader || '', apiKey,
+        });
+      }
+      if (!entry || !entry.url || !entry.fileName) continue;
+      const dest = path.join(dir, entry.fileName);
+      if (!exists(dest)) {
+        onProgress({ stage: 'deps', message: `下载前置 ${entry.fileName}`, percent: 0, speed: 0 });
+        await downloadFile(entry.url, dest, { sha1: entry.sha1 || undefined, retries: 2 });
+      }
+      n++;
+      n += await installCurseDeps(entry.requiredDeps || [], dir, apiKey, onProgress, seen, depth + 1, ctx);
+    } catch { /* 单个前置失败不阻断主文件安装 */ }
+  }
+  return n;
 }
 
 async function installModpack(payload, onProgress) {
@@ -2997,15 +3119,28 @@ function registerIPC() {
   ipcMain.handle('download:search', async (_, opts) => {
     try {
       const category = DL_CATEGORIES[opts.category] ? opts.category : 'mod';
-      const source = ['modrinth', 'mirror'].includes(opts.source) ? opts.source : 'modrinth';
+      const source = ['modrinth', 'mirror', 'curseforge'].includes(opts.source) ? opts.source : 'modrinth';
       if (category === 'vanilla') return await vanillaList({ ...opts, category, source });
-      
+      if (source === 'curseforge') {
+        const g = (loadSettings().global || {});
+        return await curseforge.searchMods({ ...opts, category, apiKey: g.curseforgeApiKey || '' });
+      }
       return await modrinthSearch({ ...opts, category });
     } catch (e) { return { error: e.message }; }
   });
 
-  ipcMain.handle('download:detail', async (_, { id }) => {
+  ipcMain.handle('download:detail', async (_, payload) => {
     try {
+      const { id } = payload || {};
+      const source = (payload && payload.source) || 'modrinth';
+      if (source === 'curseforge') {
+        const g = (loadSettings().global || {});
+        return await curseforge.getProject(id, {
+          mcVersion: (payload && payload.mcVersion) || '',
+          loader: (payload && payload.loader) || '',
+          apiKey: g.curseforgeApiKey || '',
+        });
+      }
       return await modrinthProject(id);
     } catch (e) { return { error: e.message }; }
   });
