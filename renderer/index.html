@@ -153,6 +153,7 @@
         <div class="dl-toolbar">
           <div class="dl-sources" id="dl-sources">
             <button class="src-btn active" data-source="modrinth" title="Modrinth 内容库">Modrinth</button>
+            <button class="src-btn" data-source="curseforge" title="CurseForge 内容库（经 MCIM 镜像加速，免 API Key）">CurseForge</button>
             <button class="src-btn" data-source="mirror" title="BMCLAPI 镜像站（加速原版下载）">镜像站</button>
           </div>
           <div class="dl-search">
@@ -275,6 +276,12 @@
               <div class="set-info"><div class="set-name">下载加速</div><div class="set-desc">安装原版时走 BMCLAPI 镜像站，国内下载更快（Mod 等第三方内容始终走 Modrinth）</div></div>
               <div class="set-ctrl">
                 <label class="set-toggle"><input type="checkbox" id="sp-mirror" /><span class="set-toggle-slider"></span></label>
+              </div>
+            </div>
+            <div class="set-card">
+              <div class="set-info"><div class="set-name">CurseForge API Key</div><div class="set-desc">选填。CurseForge 内容默认走 MCIM 镜像（免 Key）；镜像站不可用时填入自己的 Key 可自动回退官方接口。可在 console.curseforge.com 免费自助申请</div></div>
+              <div class="set-ctrl set-ctrl-wide">
+                <input type="password" id="sp-cfkey" placeholder="留空即只用镜像站" autocomplete="off" />
               </div>
             </div>
           </div>
@@ -407,7 +414,7 @@
               </div>
             </div>
             <div class="set-card set-card-info">
-              <div class="set-info"><div class="set-name">内容来源</div><div class="set-desc">下载页内容来自 Modrinth（免 API Key）与 BMCLAPI 镜像站（加速原版下载）。CurseForge 独占内容可用下载页工具栏的「导入本地文件」装入。</div></div>
+              <div class="set-info"><div class="set-name">内容来源</div><div class="set-desc">下载页内容来自 Modrinth 与 CurseForge（两者均免 API Key，CurseForge 经 MCIM 镜像加速以避开国内访问超时），以及 BMCLAPI 镜像站（加速原版下载）。Modrinth 上没有的内容可用下载页工具栏的「导入本地文件」装入。</div></div>
             </div>
           </div>
           <div class="set-pane" data-spane="account">
