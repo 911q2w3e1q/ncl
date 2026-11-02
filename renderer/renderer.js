@@ -608,6 +608,8 @@ function renderSettingsPage() {
       : '';
   }
   $('sp-mirror').checked = !!g.mirror;
+  const cfKey = $('sp-cfkey');
+  if (cfKey) cfKey.value = g.curseforgeApiKey || '';
   
   applyTheme(g);
   document.querySelectorAll('.set-swatch').forEach((b) => b.classList.toggle('active', b.dataset.accent === (g.accent || 'pink')));
@@ -680,6 +682,10 @@ function bindSettingsPage() {
     else api('settings:save', { global: patch });
   });
   $('sp-mirror').addEventListener('change', (e) => save({ mirror: e.target.checked }));
+  const cfKeyInput = $('sp-cfkey');
+  if (cfKeyInput) {
+    cfKeyInput.addEventListener('change', (e) => save({ curseforgeApiKey: e.target.value.trim() }));
+  }
   
   document.querySelectorAll('.set-swatch').forEach((btn) => {
     btn.onclick = async () => {
@@ -1570,7 +1576,10 @@ async function dlLoadList() {
   const box = $('dl-items');
   box.innerHTML = '<div class="dl-empty">正在加载内容列表…</div>';
   $('dl-count').textContent = '加载中…';
-  $('dl-source-note').textContent = dl.source === 'mirror' ? '镜像站：仅原版分类生效' : '';
+  $('dl-source-note').textContent =
+    dl.source === 'mirror' ? '镜像站：仅原版分类生效'
+    : dl.source === 'curseforge' ? 'CurseForge：经 MCIM 镜像加速，免 API Key'
+    : '';
   
   const q = dl.query.replace(/[’‘]/g, "'").replace(/[“”]/g, '"');
   const r = await api('download:search', {
@@ -1636,7 +1645,10 @@ async function dlShowDetail(item) {
     return;
   }
 
-  const r = await api('download:detail', { source: item.source, id: item.id });
+  const r = await api('download:detail', {
+    source: item.source, id: item.id,
+    mcVersion: dl.mcVersion || '', loader: dl.loader || '',
+  });
   if (dl.activeId !== item.id) return;
   if (r && r.error) { body.innerHTML = `<div class="dl-empty">${esc(r.error)}</div>`; return; }
   dl.detail = r;
@@ -1649,20 +1661,30 @@ function dlRenderDetail() {
   if (!d) return;
   const body = $('dl-detail-body');
   const isVanilla = !!d._vanilla;
+  const isCF = d.source === 'curseforge';
   const versions = (d.versions || []).slice(0, 30);
   const range = mcVersionRange(d);
-  const loaders = isVanilla ? '原版（Vanilla）' : (d.loaders && d.loaders.length ? d.loaders.join(' / ') : '—');
+  // CurseForge 的项目级 loaders 是空的，从各文件版本里聚合
+  const loaderSet = new Set();
+  if (isCF) for (const v of d.versions || []) for (const l of v.loaders || []) loaderSet.add(l);
+  const loaders = isVanilla ? '原版（Vanilla）'
+    : (d.loaders && d.loaders.length ? d.loaders.join(' / ')
+      : (loaderSet.size ? [...loaderSet].join(' / ') : '—'));
   const installed = isVanilla && dl.items.find((i) => i.id === d.id && i.installed);
+  const latestName = (d.latest && (d.latest.number || d.latest.name)) || '—';
+  const oldestName = (d.oldest && (d.oldest.number || d.oldest.name)) || '—';
+  const depCount = (d.requiredDeps || []).length;
   body.innerHTML =
     `<div class="dd-head">${dlIconHTML(d, 'dd-icon', isVanilla)}<div><div class="dd-title">${esc(d.title)}</div>` +
     `<div class="dd-author">${esc(d.author || '未知作者')}${d.downloads ? ' · ' + fmtCount(d.downloads) + ' 下载' : ''}</div></div></div>` +
     (d.summary ? `<div class="dd-summary">${esc(d.summary)}</div>` : '') +
     `<div class="dd-facts">` +
-    `<div class="dd-fact"><span>最新版本</span><b>${esc((d.latest && d.latest.number) || '—')}</b></div>` +
-    `<div class="dd-fact"><span>最老版本</span><b>${esc((d.oldest && d.oldest.number) || '—')}</b></div>` +
+    `<div class="dd-fact"><span>最新版本</span><b>${esc(latestName)}</b></div>` +
+    `<div class="dd-fact"><span>最老版本</span><b>${esc(oldestName)}</b></div>` +
     `<div class="dd-fact"><span>支持 MC 版本</span><b>${esc(range)}</b></div>` +
     `<div class="dd-fact"><span>加载器</span><b>${esc(loaders)}</b></div>` +
     `</div>` +
+    (depCount ? `<div class="dd-summary" style="margin-top:8px">⚠ 该内容需要 ${depCount} 个前置模组，安装时会一并下载</div>` : '') +
     (versions.length > 1 ? `<div class="dd-versions-label">版本列表（${versions.length}）</div><div class="dd-versions" id="dd-versions">` +
       versions.map((v) =>
         `<div class="dd-version${v.id === dl.selectedVersionId ? ' sel' : ''}" data-vid="${esc(v.id)}">` +
@@ -1673,7 +1695,7 @@ function dlRenderDetail() {
         (installed ? '' : `<button class="btn-ghost btn-sm" id="dd-install-loader">用加载器安装</button>`)
       : `<button class="btn" id="dd-install">安装${dl.selectedVersionId ? '所选版本' : ''}</button>`) +
     `</div>` +
-    (d.url ? `<div class="dd-open"><a href="#" id="dd-open-url">在 Modrinth 上查看 ↗</a></div>` : '');
+    (d.url ? `<div class="dd-open"><a href="#" id="dd-open-url">在 ${isCF ? 'CurseForge' : 'Modrinth'} 上查看 ↗</a></div>` : '');
   body.querySelectorAll('.dd-version').forEach((row) => (row.onclick = () => {
     dl.selectedVersionId = row.dataset.vid;
     body.querySelectorAll('.dd-version').forEach((x) => x.classList.toggle('sel', x === row));
@@ -1808,6 +1830,8 @@ async function dlInstall() {
     payload = {
       source: d.source, category: dl.category, projectId: d.id, versionId: v.id,
       url: v.url, fileName: v.fileName, sha1: v.sha1,
+      requiredDeps: Array.isArray(v.requiredDeps) ? v.requiredDeps : [],
+      mcVersion: dl.mcVersion || '', loader: dl.loader || '',
     };
   }
   dl.installing = true;
@@ -1853,6 +1877,15 @@ function bindDownloadUI() {
     btn.onclick = () => {
       document.querySelectorAll('.src-btn').forEach((b) => b.classList.toggle('active', b === btn));
       dl.source = btn.dataset.source;
+      // CurseForge 没有原版游戏，切过来时把分类换成 Mod
+      if (dl.source === 'curseforge' && dl.category === 'vanilla') {
+        dl.category = 'mod';
+        document.querySelectorAll('.dl-cat').forEach((b) => b.classList.toggle('active', b.dataset.cat === 'mod'));
+        $('dl-loader').disabled = false;
+      }
+      dl.activeId = null; dl.detail = null; dl.selectedVersionId = null;
+      $('dl-detail-body').hidden = true;
+      $('dl-detail-empty').hidden = false;
       dlLoadList();
     };
   });
