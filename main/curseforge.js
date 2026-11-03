@@ -67,6 +67,48 @@ function rewriteCdnUrl(url) {
 }
 
 /**
+ * 生成下载候选地址（按优先级）。
+ *
+ * 关键实测（2026-11，国内出口）：
+ *   - 源站 CDN（edge.forgecdn.net / mediafilez.forgecdn.net）免 Key 直连可用，
+ *     4/4 真实文件 200 且内容完整。国内根本不需要 Key 才能下载文件。
+ *   - MCIM 的 /files/ 并不是真代理，它 302 回源站，所以「只走镜像」等于多一跳，
+ *     而且 MCIM 一挂下载就全线断。
+ *   - /avatars/ 则相反：MCIM 有真缓存，源站偶发 403。
+ *
+ * 所以顺序是：源站直连 -> 备用 CDN 域 -> MCIM 镜像。
+ * 拿到官方 Key 时给源站补 x-api-key（CF 公告过 CDN 下载后续会强制带 Key）。
+ */
+function cdnCandidates(url, apiKey = '') {
+  const s = String(url || '');
+  if (!s) return [];
+  const out = [];
+  const push = (u, useKey) => {
+    if (!u) return;
+    if (out.some((x) => x.url === u)) return;
+    out.push({ url: u, useKey: !!useKey });
+  };
+
+  const isCdn = CF_CDN_HOSTS.some((h) => s.includes(h));
+  if (!isCdn) return [{ url: s, useKey: false }];
+
+  // 1) 源站直连（免 Key 在国内可用）
+  push(s, !!apiKey);
+
+  // 2) 备用 CDN 域：edge 挂了还有 mediafilez / media
+  const path = s.replace(/^https:\/\/[^/]+/, '');
+  for (const host of CF_CDN_HOSTS) {
+    if (host === 'media.forgecdn.net') continue; // 仅存头像，文件不在这里
+    push(`https://${host}${path}`, !!apiKey);
+  }
+
+  // 3) MCIM 镜像（/files/ 会 302 回源，/avatars/ 是真缓存）
+  push(rewriteCdnUrl(s), false);
+
+  return out;
+}
+
+/**
  * 从 CurseForge 的 hashes 数组里取指定算法的值。
  * CF 的枚举：1 = Sha1，2 = Md5。
  */
@@ -109,7 +151,10 @@ function cfFileToEntry(file, mcVersion) {
     date: file.fileDate || '',
     gameVersions: Array.isArray(file.gameVersions) ? file.gameVersions : [],
     loaders: pickLoaders(file),
-    url: rewriteCdnUrl(file.downloadUrl || ''),
+    // 保留源站地址：下载候选由 cdnCandidates() 在下载时按可用性决定，
+    // 头像/图标才用 MCIM（有真缓存）。
+    url: file.downloadUrl || '',
+    icon: rewriteCdnUrl((file.logo && file.logo.url) || ''),
     fileName: file.fileName || '',
     sha1: pickHash(file.hashes, 1),
     size: file.fileLength || 0,
@@ -343,6 +388,7 @@ module.exports = {
   CF_MIRROR_API,
   CF_OFFICIAL_API,
   rewriteCdnUrl,
+  cdnCandidates,
   pickHash,
   searchMods,
   getProject,
