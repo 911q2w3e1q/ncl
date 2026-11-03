@@ -270,6 +270,13 @@ function main() {
   copyDir(dist, stageDir);
 
   console.log(`[2/6] 准备应用代码…`);
+  // 编译期注入 CurseForge API Key（若设置了 NCL_CURSEFORGE_API_KEY）
+  // 生成的 main/secrets.js 会被 stageApp 一起拷进产物；未设置 Key 时该文件不存在。
+  const secrets = require('./inject-secrets.js');
+  const secretRes = secrets.injectSecrets(secrets.readKey());
+  console.log(secretRes.injected
+    ? '      已内置 CurseForge API Key（来自 NCL_CURSEFORGE_API_KEY）'
+    : '      未设置 NCL_CURSEFORGE_API_KEY，本次构建不含内置 Key');
   const appDir = stageApp(stageDir);
 
   console.log(`[3/6] asar 打包…`);
