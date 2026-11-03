@@ -50,7 +50,8 @@
   - 一键安装：Mod / 资源包 / 光影包 / 数据包装入当前版本游戏目录（尊重版本隔离）；Modrinth 整合包自动解析 `modrinth.index.json`、装基础版本与 Fabric、下载全部文件并解压 overrides；原版分类支持镜像站加速
   - **CurseForge 接入**（v1.11.4）：切到 CurseForge 来源即可搜到 Modrinth 没有的内容
     - 走国内公益镜像 `mod.mcimirror.top`（MCIM），**不需要任何 API Key**，也不受 CurseForge 官方接口在国内访问超时的影响
-    - Modrinth / CurseForge 双源均免 Key；镜像站不可用时可在「设置 → CurseForge API Key」填入自备 Key（`console.curseforge.com` 免费自助申请）自动回退官方接口
+    - **下载多源回退**：文件实际下载按「源站 CDN 直连 → 备用 CDN 域 → MCIM 镜像」逐个尝试，任一环成功即止，并做 SHA1 校验。三环实测均 200 且哈希一致，单个源挂掉不会导致下载全线断
+    - Modrinth / CurseForge 双源均免 Key；如需在镜像失效时回退官方接口，可在「设置 → CurseForge API Key」填入自备 Key
     - **自动补前置依赖**：CurseForge 模组普遍带 Required 依赖，安装时一并递归下载（去重 + 限深 4 层，避免循环依赖），不用再手动一个个装
     - **CurseForge 整合包**：解析 `manifest.json`，装基础版本与 Fabric 加载器、下载全部文件、解压 overrides
     - 已知的平台限制：部分作者在 CurseForge 上开启了「禁止第三方启动器下载」，这类内容任何启动器都拿不到，只能浏览器下载后用「导入本地文件」装入
