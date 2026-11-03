@@ -389,6 +389,16 @@ function main() {
   console.log('\n可裁剪项清单：');
   for (const [name, s] of removed) console.log(`  - ${name}  ${(s / 1048576).toFixed(2)} MB`);
   console.log('\n下一步：压缩成 zip/tar.gz 并上传 Release');
+
+  // 打包前最后一道检查：产物里若带了内置 Key，提示这属于「内嵌密钥的公开分发」
+  const secretsInOut = path.join(outPath, 'engine', 'resources', 'app', 'main', 'secrets.js');
+  if (fs.existsSync(secretsInOut)) {
+    console.log('\n⚠️  本次产物包含内置 CurseForge API Key（main/secrets.js）。');
+    console.log('    这相当于公开发布一把共享密钥。请确认：');
+    console.log('      · 该 Key 由你自己申请（不是 PCL / Prism 等其他项目的）');
+    console.log('      · 已接受 CurseForge 3rd Party API Terms and Conditions');
+    console.log('    若不想公开分发，去掉环境变量 NCL_CURSEFORGE_API_KEY 后重新构建即可。');
+  }
 }
 
 main();
