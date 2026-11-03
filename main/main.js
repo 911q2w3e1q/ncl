@@ -2055,7 +2055,7 @@ async function installContent(payload, onProgress) {
  */
 async function installCurseModpack(payload, onProgress) {
   const g = (loadSettings().global || {});
-  const apiKey = g.curseforgeApiKey || '';
+  const apiKey = curseforge.resolveApiKey(g.curseforgeApiKey || '');
   const gameDir = contentGameDir();
   const packDir = path.join(gameDir, 'modpacks');
   ensureDir(packDir);
@@ -2137,7 +2137,7 @@ async function installSingleFile(payload, onProgress) {
   const dest = path.join(dir, fileName);
   onProgress({ stage: 'file', message: `下载 ${fileName}`, percent: 0, speed: 0 });
   const g = (loadSettings().global || {});
-  const cfKey = g.curseforgeApiKey || '';
+  const cfKey = curseforge.resolveApiKey(g.curseforgeApiKey || '');
   await downloadFile(payload.url, dest, {
     sha1: payload.sha1 || undefined,
     // CurseForge 文件：源站直连（国内免 Key 可用）-> 备用 CDN 域 -> MCIM 镜像
@@ -2154,7 +2154,7 @@ async function installSingleFile(payload, onProgress) {
   if (payload.source === 'curseforge' && Array.isArray(payload.requiredDeps) && payload.requiredDeps.length) {
     const g = (loadSettings().global || {});
     const seen = new Set([String(payload.versionId || '')]);
-    installedDeps = await installCurseDeps(payload.requiredDeps, dir, g.curseforgeApiKey || '', onProgress, seen, 0, {
+    installedDeps = await installCurseDeps(payload.requiredDeps, dir, curseforge.resolveApiKey(g.curseforgeApiKey || ''), onProgress, seen, 0, {
       mcVersion: payload.mcVersion || '', loader: payload.loader || '',
     });
   }
@@ -3148,7 +3148,7 @@ function registerIPC() {
       if (category === 'vanilla') return await vanillaList({ ...opts, category, source });
       if (source === 'curseforge') {
         const g = (loadSettings().global || {});
-        return await curseforge.searchMods({ ...opts, category, apiKey: g.curseforgeApiKey || '' });
+        return await curseforge.searchMods({ ...opts, category, apiKey: curseforge.resolveApiKey(g.curseforgeApiKey || '') });
       }
       return await modrinthSearch({ ...opts, category });
     } catch (e) { return { error: e.message }; }
@@ -3163,7 +3163,7 @@ function registerIPC() {
         return await curseforge.getProject(id, {
           mcVersion: (payload && payload.mcVersion) || '',
           loader: (payload && payload.loader) || '',
-          apiKey: g.curseforgeApiKey || '',
+          apiKey: curseforge.resolveApiKey(g.curseforgeApiKey || ''),
         });
       }
       return await modrinthProject(id);
