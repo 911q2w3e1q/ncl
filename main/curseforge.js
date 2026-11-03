@@ -9,7 +9,12 @@
  *   media.forgecdn.net/avatars/..-> mod.mcimirror.top/avatars/...
  *
  * 镜像站是公益服务，随时可能不可用，所以每次请求都带超时与降级：
- *   镜像失败 -> 官方 API（需要用户自备 key，没有 key 时给出明确提示）
+ *   镜像失败 -> 官方 API（需要 API Key）
+ *
+ * API Key 的来源，按优先级：
+ *   1. 用户在「设置 → CurseForge API Key」里自己填的
+ *   2. 编译期内置的 main/secrets.js（由 tools/build-electron.js 生成，源码仓库中不存在）
+ *   3. 没有 —— 此时只走镜像，功能不受影响
  */
 
 const CF_GAME_ID = 432;
@@ -40,6 +45,32 @@ const CF_MIRROR_CDN = 'https://mod.mcimirror.top';
 const CF_OFFICIAL_API = 'https://api.curseforge.com/v1';
 
 const CF_UA = 'NCL/NexusCraftLauncher (+https://github.com/911q2w3e1q/ncl)';
+
+/**
+ * 编译期内置的 CurseForge API Key。
+ *
+ * main/secrets.js 只在构建时由 tools/build-electron.js 生成（内容来自环境变量
+ * NCL_CURSEFORGE_API_KEY），源码仓库里不存在这个文件，所以 require 会抛错。
+ * 这里安全降级为空串 —— 没有内置 Key 时所有功能照常可用，只是没有官方接口兜底。
+ */
+const CF_BUILTIN_API_KEY = (() => {
+  try {
+    const s = require('./secrets.js');
+    return String((s && s.CURSEFORGE_API_KEY) || '').trim();
+  } catch {
+    return '';
+  }
+})();
+
+/**
+ * 解析出本次请求实际使用的 API Key。
+ * 用户自填优先于编译期内置；两者都没有则返回空串（只走镜像）。
+ */
+function resolveApiKey(userKey = '') {
+  const u = String(userKey || '').trim();
+  if (u) return u;
+  return CF_BUILTIN_API_KEY;
+}
 
 // 官方 CDN 域名（已废弃的 edge 也留着，CF 仍在返回它）
 const CF_CDN_HOSTS = ['edge.forgecdn.net', 'mediafilez.forgecdn.net', 'media.forgecdn.net'];
@@ -82,6 +113,7 @@ function rewriteCdnUrl(url) {
 function cdnCandidates(url, apiKey = '') {
   const s = String(url || '');
   if (!s) return [];
+  const key = resolveApiKey(apiKey);
   const out = [];
   const push = (u, useKey) => {
     if (!u) return;
@@ -92,14 +124,14 @@ function cdnCandidates(url, apiKey = '') {
   const isCdn = CF_CDN_HOSTS.some((h) => s.includes(h));
   if (!isCdn) return [{ url: s, useKey: false }];
 
-  // 1) 源站直连（免 Key 在国内可用）
-  push(s, !!apiKey);
+  // 1) 源站直连（免 Key 在国内可用；若有 Key 则带上，将来 CF 强制鉴权也能走）
+  push(s, !!key);
 
   // 2) 备用 CDN 域：edge 挂了还有 mediafilez / media
   const path = s.replace(/^https:\/\/[^/]+/, '');
   for (const host of CF_CDN_HOSTS) {
     if (host === 'media.forgecdn.net') continue; // 仅存头像，文件不在这里
-    push(`https://${host}${path}`, !!apiKey);
+    push(`https://${host}${path}`, !!key);
   }
 
   // 3) MCIM 镜像（/files/ 会 302 回源，/avatars/ 是真缓存）
@@ -168,7 +200,8 @@ function cfFileToEntry(file, mcVersion) {
  * 统一的 CF 请求：先打镜像，失败再打官方（官方需要 key）。
  */
 async function cfFetch(path, opts = {}) {
-  const { apiKey = '', timeout = 30000, retries = 2 } = opts;
+  const { apiKey: userKey = '', timeout = 30000, retries = 2 } = opts;
+  const apiKey = resolveApiKey(userKey);
   const query = path.includes('?') ? path.slice(path.indexOf('?')) : '';
   const bare = path.split('?')[0];
   const targets = [{ base: CF_MIRROR_API, key: '' }];
@@ -389,6 +422,8 @@ module.exports = {
   CF_OFFICIAL_API,
   rewriteCdnUrl,
   cdnCandidates,
+  resolveApiKey,
+  CF_BUILTIN_API_KEY,
   pickHash,
   searchMods,
   getProject,
