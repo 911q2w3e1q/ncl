@@ -12,3 +12,7 @@ dotnet/**/obj/
 # （1.2MB 压缩 bundle 会被 GitHub secret scanning 误判为密钥，且本可随时重建）
 ai/ai-runtime.js
 main.js
+
+# 构建期注入的密钥：仅存在于构建机与产物中，绝不入库
+# 由 tools/build-electron.js 依据环境变量 NCL_CURSEFORGE_API_KEY 生成
+main/secrets.js
