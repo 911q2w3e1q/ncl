@@ -71,6 +71,40 @@ t('空值与非法输入安全', () => {
   assert.strictEqual(cf.rewriteCdnUrl(undefined), '');
 });
 
+console.log('=== CDN 多源回退候选 ===');
+t('源站直连排在第一位（国内免 Key 可用）', () => {
+  const src = 'https://edge.forgecdn.net/files/9362/319/jei.jar';
+  const out = cf.cdnCandidates(src);
+  assert.ok(out.length >= 2, '候选过少');
+  assert.strictEqual(out[0].url, src, '首个候选必须是源站直连');
+  assert.strictEqual(out[0].useKey, false, '无 Key 时不应带 x-api-key');
+});
+
+t('候选包含备用 CDN 域与 MCIM 镜像兜底', () => {
+  const out = cf.cdnCandidates('https://edge.forgecdn.net/files/9362/319/jei.jar');
+  const urls = out.map((c) => c.url);
+  assert.ok(urls.some((u) => u.indexOf('mediafilez.forgecdn.net') >= 0), '缺备用 CDN 域');
+  assert.ok(urls.some((u) => u.indexOf('mod.mcimirror.top') >= 0), '缺 MCIM 镜像兜底');
+  assert.strictEqual(new Set(urls).size, urls.length, '候选不应重复');
+});
+
+t('有 Key 时源站候选带上 useKey', () => {
+  const out = cf.cdnCandidates('https://edge.forgecdn.net/files/1/2/a.jar', 'KEY123');
+  assert.strictEqual(out[0].useKey, true, '有 Key 时源站应带 Key');
+});
+
+t('非 CurseForge 地址只返回自身，不做改写', () => {
+  const src = 'https://cdn.modrinth.com/data/abc/mod.jar';
+  const out = cf.cdnCandidates(src);
+  assert.strictEqual(out.length, 1);
+  assert.strictEqual(out[0].url, src);
+});
+
+t('空地址返回空候选', () => {
+  assert.deepStrictEqual(cf.cdnCandidates(''), []);
+  assert.deepStrictEqual(cf.cdnCandidates(null), []);
+});
+
 console.log('=== 哈希提取 ===');
 t('algo=1 取 SHA1，algo=2 取 MD5', () => {
   const hashes = [{ value: 'abc123', algo: 1 }, { value: 'def456', algo: 2 }];
@@ -223,7 +257,12 @@ console.log('=== 真实接口连通（联网）===');
     const p = await cf.getProject('238222', { mcVersion: '1.20.1', loader: 'fabric' });
     assert.ok(p.versions.length > 0, '详情未返回文件列表');
     const latest = p.versions[0];
-    assert.ok(latest.url.indexOf('mod.mcimirror.top') >= 0, '下载地址未改写到镜像：' + latest.url);
+    // 文件下载保留源站地址（国内免 Key 可直连），由 cdnCandidates 在下载时选源
+    assert.ok(/forgecdn\.net/.test(latest.url), '下载地址应保留源站 CDN 地址：' + latest.url);
+    const cands = cf.cdnCandidates(latest.url);
+    assert.ok(cands.length >= 2, '应生成多源回退候选');
+    assert.ok(cands[0].url === latest.url, '首个候选应为源站直连');
+    assert.ok(cands.some((c) => c.url.indexOf('mod.mcimirror.top') >= 0), '候选里应包含 MCIM 镜像兜底');
     assert.ok(latest.sha1 && latest.sha1.length === 40, '未取到 SHA1');
     console.log(`      详情返回 ${p.versions.length} 个版本，最新：${latest.name}`);
     passed++; console.log('PASS  MCIM 镜像详情可用');
