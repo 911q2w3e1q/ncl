@@ -178,57 +178,67 @@ function sha1File(p) {
 }
 
 async function downloadFile(url, dest, opts = {}) {
-  const { onProgress, sha1, retries = 3, timeout = 120000 } = opts;
+  const { onProgress, sha1, retries = 3, timeout = 120000, candidates = null } = opts;
   ensureDir(path.dirname(dest));
+  // candidates: [{ url, useKey }] —— 多源回退（如 CurseForge：源站直连 -> 备用域 -> 镜像）
+  const list = Array.isArray(candidates) && candidates.length
+    ? candidates
+    : [{ url, useKey: false }];
   let lastErr = null;
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    let timer = null;
-    try {
-      const ac = new AbortController();
-      timer = setTimeout(() => ac.abort(), timeout);
-      const res = await fetch(url, { signal: ac.signal, redirect: 'follow' });
-      if (!res.ok) throw new Error(`HTTP ${res.status} ${url}`);
-      const total = Number(res.headers.get('content-length') || 0);
-      let loaded = 0;
-      const t0 = Date.now();
-      let lastTick = t0;
-      let lastLoaded = 0;
-      const tmp = dest + '.part';
-      const ws = fs.createWriteStream(tmp);
-      const bodyStream = Readable.fromWeb(res.body);
-      await new Promise((resolve, reject) => {
-        bodyStream.on('data', (chunk) => {
-          loaded += chunk.length;
-          const now = Date.now();
-          if (onProgress && now - lastTick >= 200) {
-            const speed = (loaded - lastLoaded) / Math.max(0.001, (now - lastTick) / 1000);
-            lastTick = now;
-            lastLoaded = loaded;
-            onProgress({
-              loaded,
-              total,
-              speed,
-              percent: total ? Math.min(100, Math.round((loaded / total) * 100)) : 0,
-              file: path.basename(dest)
-            });
-          }
+  for (const cand of list) {
+    if (!cand || !cand.url) continue;
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      let timer = null;
+      try {
+        const ac = new AbortController();
+        timer = setTimeout(() => ac.abort(), timeout);
+        const headers = {};
+        if (cand.useKey && cand.apiKey) headers['x-api-key'] = cand.apiKey;
+        const res = await fetch(cand.url, { headers, signal: ac.signal, redirect: 'follow' });
+        if (!res.ok) throw new Error(`HTTP ${res.status} ${cand.url}`);
+        const total = Number(res.headers.get('content-length') || 0);
+        let loaded = 0;
+        const t0 = Date.now();
+        let lastTick = t0;
+        let lastLoaded = 0;
+        const tmp = dest + '.part';
+        const ws = fs.createWriteStream(tmp);
+        const bodyStream = Readable.fromWeb(res.body);
+        await new Promise((resolve, reject) => {
+          bodyStream.on('data', (chunk) => {
+            loaded += chunk.length;
+            const now = Date.now();
+            if (onProgress && now - lastTick >= 200) {
+              const speed = (loaded - lastLoaded) / Math.max(0.001, (now - lastTick) / 1000);
+              lastTick = now;
+              lastLoaded = loaded;
+              onProgress({
+                loaded,
+                total,
+                speed,
+                percent: total ? Math.min(100, Math.round((loaded / total) * 100)) : 0,
+                file: path.basename(dest)
+              });
+            }
+          });
+          bodyStream.on('error', reject);
+          ws.on('error', reject);
+          ws.on('finish', resolve);
+          bodyStream.pipe(ws);
         });
-        bodyStream.on('error', reject);
-        ws.on('error', reject);
-        ws.on('finish', resolve);
-        bodyStream.pipe(ws);
-      });
-      if (sha1) {
-        const got = await sha1File(tmp);
-        if (got !== sha1) { fs.unlinkSync(tmp); throw new Error(`SHA1 校验失败 ${path.basename(dest)}`); }
+        if (sha1) {
+          const got = await sha1File(tmp);
+          if (got !== sha1) { fs.unlinkSync(tmp); throw new Error(`SHA1 校验失败 ${path.basename(dest)}`); }
+        }
+        fs.renameSync(tmp, dest);
+        return dest;
+      } catch (e) {
+        lastErr = e;
+        try { if (fs.existsSync(dest + '.part')) fs.unlinkSync(dest + '.part'); } catch {}
+        if (attempt < retries) await sleep(800 * attempt);
+      } finally {
+        if (timer) clearTimeout(timer);
       }
-      fs.renameSync(tmp, dest);
-      return dest;
-    } catch (e) {
-      lastErr = e;
-      if (attempt < retries) await sleep(800 * attempt);
-    } finally {
-      if (timer) clearTimeout(timer);
     }
   }
   throw new Error(`下载失败: ${url} -> ${lastErr && lastErr.message}`);
@@ -2096,7 +2106,12 @@ async function installCurseModpack(payload, onProgress) {
         if (!entry || !entry.url) { failed++; return; }
         const dest = path.join(modsDir, entry.fileName);
         if (exists(dest)) return;
-        await downloadFile(entry.url, dest, { sha1: entry.sha1 || undefined, retries: 2 });
+        // 同样走多源回退：源站直连（国内免 Key 可用）-> 备用 CDN 域 -> MCIM 镜像
+        await downloadFile(entry.url, dest, {
+          sha1: entry.sha1 || undefined,
+          retries: 2,
+          candidates: curseforge.cdnCandidates(entry.url, apiKey).map((c) => ({ ...c, apiKey })),
+        });
       } catch {
         failed++;
       }
@@ -2121,8 +2136,14 @@ async function installSingleFile(payload, onProgress) {
   const fileName = payload.fileName || `${payload.projectId}-${payload.versionId}.jar`;
   const dest = path.join(dir, fileName);
   onProgress({ stage: 'file', message: `下载 ${fileName}`, percent: 0, speed: 0 });
+  const g = (loadSettings().global || {});
+  const cfKey = g.curseforgeApiKey || '';
   await downloadFile(payload.url, dest, {
     sha1: payload.sha1 || undefined,
+    // CurseForge 文件：源站直连（国内免 Key 可用）-> 备用 CDN 域 -> MCIM 镜像
+    candidates: payload.source === 'curseforge'
+      ? curseforge.cdnCandidates(payload.url, cfKey).map((c) => ({ ...c, apiKey: cfKey }))
+      : null,
     onProgress: (p) => onProgress({
       stage: 'file', message: `下载 ${fileName} ${p.percent || 0}%`,
       percent: p.total ? Math.round((p.loaded / p.total) * 100) : 0, speed: p.speed,
@@ -2165,7 +2186,11 @@ async function installCurseDeps(deps, dir, apiKey, onProgress, seen, depth, ctx 
       const dest = path.join(dir, entry.fileName);
       if (!exists(dest)) {
         onProgress({ stage: 'deps', message: `下载前置 ${entry.fileName}`, percent: 0, speed: 0 });
-        await downloadFile(entry.url, dest, { sha1: entry.sha1 || undefined, retries: 2 });
+        await downloadFile(entry.url, dest, {
+          sha1: entry.sha1 || undefined,
+          retries: 2,
+          candidates: curseforge.cdnCandidates(entry.url, apiKey).map((c) => ({ ...c, apiKey })),
+        });
       }
       n++;
       n += await installCurseDeps(entry.requiredDeps || [], dir, apiKey, onProgress, seen, depth + 1, ctx);
