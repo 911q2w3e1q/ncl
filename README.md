@@ -52,6 +52,7 @@
     - 走国内公益镜像 `mod.mcimirror.top`（MCIM），**不需要任何 API Key**，也不受 CurseForge 官方接口在国内访问超时的影响
     - **下载多源回退**：文件实际下载按「源站 CDN 直连 → 备用 CDN 域 → MCIM 镜像」逐个尝试，任一环成功即止，并做 SHA1 校验。三环实测均 200 且哈希一致，单个源挂掉不会导致下载全线断
     - Modrinth / CurseForge 双源均免 Key；如需在镜像失效时回退官方接口，可在「设置 → CurseForge API Key」填入自备 Key
+    - **Key 编译期注入**（v1.11.6）：支持把自备 Key 通过环境变量 `NCL_CURSEFORGE_API_KEY` 注入构建产物，源码仓库中不含任何明文 Key（`.gitignore` 忽略 `main/secrets.js`）。未设置时行为与现在完全一致 —— 免 Key 走镜像，功能不降级。详见 `docs/curseforge-api-key-内置指南.md`
     - **自动补前置依赖**：CurseForge 模组普遍带 Required 依赖，安装时一并递归下载（去重 + 限深 4 层，避免循环依赖），不用再手动一个个装
     - **CurseForge 整合包**：解析 `manifest.json`，装基础版本与 Fabric 加载器、下载全部文件、解压 overrides
     - 已知的平台限制：部分作者在 CurseForge 上开启了「禁止第三方启动器下载」，这类内容任何启动器都拿不到，只能浏览器下载后用「导入本地文件」装入
@@ -147,6 +148,7 @@ npm start
 npm test              # 核心逻辑单测（规则求值、UUID、Java 探测、LittleSkin 接口）
 node test/download-test.js  # 下载中心连通性（Modrinth 搜索/详情/分类）
 node test/curseforge-test.js # CurseForge 接入（镜像搜索/详情/CDN 改写/manifest 解析/依赖安装）
+node test/secrets-test.js     # CurseForge Key 编译期注入（注入/降级/优先级/仓库卫生）
 node test/coverage-test.js  # Modrinth 覆盖率回归（33 个主流模组含弯引号变体，验证删 CF 后内容库够用）
 node test/import-test.js   # 本地整合包导入端到端（最小 .mrpack → 装 1.20.1+Fabric → 解压 overrides）
 node test/wiki-test.js     # Wiki 版本信息（已安装/未安装/不存在 + Java 主版本/SHA1/jar 大小）
