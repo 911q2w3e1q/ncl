@@ -4,6 +4,9 @@ Version 1.0
 
 Copyright (c) 2026 NCL — Nexus Craft Launcher contributors
 
+本条款严格遵循MIT协议开源，如有不服者请查看MIT开源条款。
+（源码授权以仓库根目录 MIT LICENSE 为准，全文亦附于本声明末尾。）
+
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 关于本声明与 MIT 许可证的关系（务必先读）
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -40,7 +43,7 @@ Copyright (c) 2026 NCL — Nexus Craft Launcher contributors
     用自己的门禁卡进门没问题，把卡号发到网上让人复制是另一回事。
 
 问：我把源码 down 下来自己编译、换成我自己的 key，不就绕过去了？
-答：完全可以，这正是开源目的，第一条也明写允许。您自己申请的 key 属于您，
+答：完全可以，这正是开源目的，开头的 MIT 授权说明也写明允许。您自己申请的 key 属于您，
     怎么用、开不开源都随您。本声明禁止的只有一样：把官方分发版里那串不属于
     您的 key 抠出来用。自己的东西随便用，别人的东西不能拿。
 
@@ -49,7 +52,7 @@ Copyright (c) 2026 NCL — Nexus Craft Launcher contributors
     您用一次就消耗合法持有者的配额。偷偷用不改变性质，只改变被发现的时间。
 
 问：MIT 允许闭源再分发，那我拿源码改成闭源软件卖钱，你能怎样？
-答：不能怎样，也不打算怎样——MIT 明确允许，第一条也明写不限制闭源再分发。
+答：不能怎样，也不打算怎样——MIT 明确允许，开头的 MIT 授权说明也写明不限制闭源再分发。
     改完换个名字卖钱随您，名称里不必保留 NCL 字样。唯一的底线是商标：
     别用 NCL 名义冒充官方、别让人误以为是官方出品。这正是开源的本意，不是漏洞。
 
@@ -274,3 +277,29 @@ Copyright (c) 2026 NCL — Nexus Craft Launcher contributors
 开发者保留。
 
 — 完 —
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+附录 MIT 许可证全文（与仓库根目录 LICENSE 一致）
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+MIT License
+
+Copyright (c) 2026 the_end_by
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
